@@ -2,11 +2,6 @@ name: Build Windows
 
 on:
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Version tag (e.g. v0.1.0)'
-        required: false
-        default: ''
 
 jobs:
   build-windows:
@@ -50,16 +45,18 @@ jobs:
         run: |
           .\.venv\Scripts\activate
           pyinstaller --onefile --name backend --console src/main.py
-          # Rename to Tauri sidecar naming convention
-          mkdir ..\src-tauri\binaries -ErrorAction SilentlyContinue
-          copy dist\backend.exe ..\src-tauri\binaries\backend-x86_64-pc-windows-msvc.exe
+          New-Item -ItemType Directory -Force -Path ..\src-tauri\binaries
+          Copy-Item dist\backend.exe ..\src-tauri\binaries\backend-x86_64-pc-windows-msvc.exe
 
-      - name: Install root dependencies (Tauri CLI)
-        run: npm install
+      - name: Install npm dependencies
+        run: |
+          npm install
+          cd frontend
+          npm install
 
-      - name: Install frontend dependencies
+      - name: Build frontend
         working-directory: frontend
-        run: npm install
+        run: npm run build
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -67,7 +64,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: .
-          tauriScript: npm run tauri
+          tauriScript: npx tauri build
+          # Skip beforeBuildCommand since we already built frontend
+          args: --no-bundle false
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

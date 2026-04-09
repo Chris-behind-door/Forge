@@ -1,11 +1,11 @@
 {
   "productName": "Engineering Assistant",
   "version": "0.1.0",
-  "identifier": "com.engineer-assistant.app",
+  "identifier": "com.engineer-assistant.desktop",
   "build": {
     "beforeDevCommand": "npm run dev --prefix ../frontend",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm run build --prefix ../frontend",
+    "beforeBuildCommand": "",
     "frontendDist": "../frontend/dist"
   },
   "app": {
