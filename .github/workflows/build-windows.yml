@@ -87,6 +87,14 @@ jobs:
             --hidden-import src.utils `
             --hidden-import src.utils.paths `
             --hidden-import src.utils.llm_config `
+            --hidden-import bs4 `
+            --hidden-import numpy `
+            --hidden-import keyring `
+            --hidden-import httpx `
+            --hidden-import dotenv `
+            --hidden-import pydantic `
+            --hidden-import llama_index.core.workflow `
+            --hidden-import langchain_text_splitters `
             run.py
           New-Item -ItemType Directory -Force -Path ..\src-tauri\binaries
           Copy-Item dist\backend.exe ..\src-tauri\binaries\backend-x86_64-pc-windows-msvc.exe
