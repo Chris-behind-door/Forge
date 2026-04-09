@@ -49,8 +49,8 @@ function preprocessCitations(text: string): string {
 function childrenToText(children: React.ReactNode): string {
   if (typeof children === 'string') return children
   if (Array.isArray(children)) return children.map(childrenToText).join('')
-  if (React.isValidElement(children) && (children.props as Record<string, unknown>).children) {
-    return childrenToText((children.props as Record<string, unknown>).children as React.ReactNode)
+  if (React.isValidElement<Record<string, React.ReactNode>>(children) && children.props.children) {
+    return childrenToText(children.props.children)
   }
   return ''
 }
