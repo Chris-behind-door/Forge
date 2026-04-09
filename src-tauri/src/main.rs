@@ -1,5 +1,6 @@
-// Prevents additional console window on Windows in release, DO NOT REMOVE!!
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// In release mode on Windows, we still show console for debugging
+// TODO: Change to windows_subsystem = "windows" once sidecar is stable
+#![cfg_attr(all(not(debug_assertions), not(feature = "console")), windows_subsystem = "windows")]
 
 use std::process::Command;
 use tauri::Emitter;
@@ -48,34 +49,55 @@ fn main() {
                     .expect("Failed to spawn backend");
             } else {
                 // Prod mode: use bundled sidecar binary
-                // Tauri resolves the target triple suffix automatically
-                let sidecar_command = app
-                    .shell()
-                    .sidecar("binaries/backend")
-                    .expect("Failed to create sidecar command");
+                println!("[Forge] Attempting to start backend sidecar...");
 
-                let (mut rx, _child) = sidecar_command
-                    .env("IPC_TOKEN", ipc_token.clone())
-                    .spawn()
-                    .expect("Failed to spawn backend sidecar");
-
-                // Log sidecar output in a background thread
-                std::thread::spawn(move || {
-                    use tauri_plugin_shell::process::CommandEvent;
-                    while let Some(event) = rx.blocking_recv() {
-                        if let CommandEvent::Stdout(line) | CommandEvent::Stderr(line) = event {
-                            println!("[backend] {}", String::from_utf8_lossy(&line));
-                        }
+                let sidecar_command = match app.shell().sidecar("binaries/backend") {
+                    Ok(cmd) => cmd,
+                    Err(e) => {
+                        eprintln!("[Forge] ERROR: Failed to create sidecar command: {}", e);
+                        eprintln!("[Forge] The application will start without the backend.");
+                        app.emit("ipc-token", &ipc_token).ok();
+                        return Ok(());
                     }
-                });
+                };
+
+                match sidecar_command.env("IPC_TOKEN", ipc_token.clone()).spawn() {
+                    Ok((rx, child)) => {
+                        println!("[Forge] Backend sidecar started successfully (PID: {:?})", child.pid());
+                        // Log sidecar output in a background thread
+                        std::thread::spawn(move || {
+                            use tauri_plugin_shell::process::CommandEvent;
+                            while let Some(event) = rx.blocking_recv() {
+                                match event {
+                                    CommandEvent::Stdout(line) => println!("[backend] {}", String::from_utf8_lossy(&line)),
+                                    CommandEvent::Stderr(line) => eprintln!("[backend:err] {}", String::from_utf8_lossy(&line)),
+                                    CommandEvent::Terminated(status) => {
+                                        eprintln!("[backend] Process exited with status: {:?}", status);
+                                        break;
+                                    }
+                                    CommandEvent::Error(err) => {
+                                        eprintln!("[backend] Error: {}", err);
+                                        break;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("[Forge] ERROR: Failed to spawn backend sidecar: {}", e);
+                        eprintln!("[Forge] The application will start without the backend.");
+                    }
+                }
             }
 
             // Give backend time to start
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::thread::sleep(std::time::Duration::from_millis(1000));
 
             // Send IPC Token to frontend
-            app.emit("ipc-token", &ipc_token)
-                .expect("Failed to emit ipc-token event");
+            if let Err(e) = app.emit("ipc-token", &ipc_token) {
+                eprintln!("[Forge] Failed to emit ipc-token: {}", e);
+            }
 
             Ok(())
         })
