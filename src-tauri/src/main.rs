@@ -1,6 +1,6 @@
-// In release mode on Windows, we still show console for debugging
-// TODO: Change to windows_subsystem = "windows" once sidecar is stable
-#![cfg_attr(all(not(debug_assertions), not(feature = "console")), windows_subsystem = "windows")]
+// Keep console visible in release for now (sidecar debugging)
+// TODO: remove this line once sidecar is stable
+// #![cfg_attr(all(not(debug_assertions), not(feature = "console")), windows_subsystem = "windows")]
 
 use std::process::Command;
 use tauri::Emitter;
