@@ -45,6 +45,7 @@ jobs:
         run: |
           .\.venv\Scripts\activate
           pyinstaller --onefile --name backend --console `
+            --paths src `
             --collect-all lancedb `
             --collect-all fastembed `
             --collect-all rapidocr_onnxruntime `
@@ -63,7 +64,30 @@ jobs:
             --hidden-import uvicorn.protocols.websockets.auto `
             --hidden-import uvicorn.lifespan `
             --hidden-import uvicorn.lifespan.on `
-            src/main.py
+            --hidden-import src `
+            --hidden-import src.main `
+            --hidden-import src.routers `
+            --hidden-import src.routers.config `
+            --hidden-import src.routers.documents `
+            --hidden-import src.routers.sessions `
+            --hidden-import src.llm `
+            --hidden-import src.llm.agent `
+            --hidden-import src.llm.client `
+            --hidden-import src.llm.prompts `
+            --hidden-import src.llm.tools `
+            --hidden-import src.llm.workflow `
+            --hidden-import src.rag `
+            --hidden-import src.rag.embeddings `
+            --hidden-import src.rag.vector_store `
+            --hidden-import src.parsers `
+            --hidden-import src.parsers.pdf `
+            --hidden-import src.parsers.chm `
+            --hidden-import src.models `
+            --hidden-import src.models.session `
+            --hidden-import src.utils `
+            --hidden-import src.utils.paths `
+            --hidden-import src.utils.llm_config `
+            run.py
           New-Item -ItemType Directory -Force -Path ..\src-tauri\binaries
           Copy-Item dist\backend.exe ..\src-tauri\binaries\backend-x86_64-pc-windows-msvc.exe
 
