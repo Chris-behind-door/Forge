@@ -65,8 +65,6 @@ jobs:
         with:
           projectPath: .
           tauriScript: npx tauri build
-          # Skip beforeBuildCommand since we already built frontend
-          args: --no-bundle false
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
