@@ -1,0 +1,36 @@
+.config-view {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 24px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+
+.config-view h2 {
+  margin-bottom: 16px;
+}
+
+.custom-profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.custom-profile-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: #fafafa;
+  border-radius: 4px;
+}
+
+.custom-profile-item .profile-name {
+  font-weight: 500;
+}
+
+.custom-profile-item .profile-detail {
+  color: #666;
+  font-size: 12px;
+  flex: 1;
+}

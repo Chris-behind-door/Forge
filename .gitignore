@@ -1,0 +1,60 @@
+
+# Secrets
+*.key
+*.pem
+*.secret
+
+# Node.js
+node_modules/
+dist/
+coverage/
+.nyc_output
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Application data
+.engineer_assistant/
+
+# Build outputs
+backend/dist/
+frontend/dist/
+backend/data/
+src-tauri/target/
+binaries/build/
+binaries/*.spec
+
+# Tauri
+src-tauri/gen/
+
+# Application data (contains user keys, knowledge base, etc.)
+.engineer_assistant/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+*.egg-info/
+.git.old/
+frontend/node_modules/
+backend/.venv/
+tests/
+proxy.deprecated/
+backend/build/
+backend/dist/
+backend/data/
+backend/*.spec

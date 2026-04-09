@@ -1,0 +1,119 @@
+/**
+ * ChatView - 聊天界面样式
+ *
+ * 布局说明：
+ * - chat-view: 占满父容器高度
+ * - messages: 弹性高度，超出时滚动
+ * - input-area: 固定在底部
+ */
+
+.chat-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* 消息区域 - 可滚动 */
+.messages {
+  flex: 1;
+  min-height: 0; /* 关键：允许 flex 子项收缩 */
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+/* 空状态提示 */
+.empty-state {
+  text-align: center;
+  color: #999;
+  padding: 48px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 消息卡片 */
+.message {
+  max-width: 80%;
+  flex-shrink: 0; /* 防止消息被压缩 */
+}
+
+.message.user {
+  align-self: flex-end;
+  background: #e6f7ff;
+  border-color: #91d5ff;
+}
+
+.message.assistant {
+  align-self: flex-start;
+  background: white;
+}
+
+.message.loading {
+  align-self: flex-start;
+  background: white;
+  max-width: 200px;
+}
+
+.message-role {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.message-rounds {
+  font-size: 11px;
+  color: #999;
+  margin-left: 8px;
+}
+
+.loading-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #666;
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.message-content {
+  /* 样式由 MarkdownContent 组件接管 */
+}
+
+/* AI 免责提示 */
+.ai-disclaimer {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 12px;
+  font-style: italic;
+  color: #999;
+}
+
+/* 加载中 */
+.loading {
+  text-align: center;
+  padding: 16px;
+  flex-shrink: 0;
+}
+
+/* 输入区域 - 固定底部 */
+.input-area {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  background: white;
+  padding: 12px 16px;
+  border-top: 1px solid #f0f0f0;
+  flex-shrink: 0; /* 防止被压缩 */
+}
+
+.input-area .ant-input {
+  flex: 1;
+}

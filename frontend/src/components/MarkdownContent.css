@@ -1,0 +1,102 @@
+/* MarkdownContent - markdown 渲染样式 */
+
+.markdown-content {
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  margin: 16px 0 8px;
+  line-height: 1.4;
+}
+
+.markdown-content h1 { font-size: 1.4em; }
+.markdown-content h2 { font-size: 1.2em; }
+.markdown-content h3 { font-size: 1.1em; }
+
+.markdown-content p {
+  margin: 8px 0;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 20px;
+  margin: 8px 0;
+}
+
+.markdown-content li {
+  margin: 4px 0;
+}
+
+.markdown-content strong {
+  font-weight: 600;
+}
+
+.markdown-content em {
+  font-style: italic;
+}
+
+.markdown-content code {
+  background: #f5f5f5;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.9em;
+  font-family: 'Menlo', 'Consolas', monospace;
+}
+
+.markdown-content pre {
+  background: #f5f5f5;
+  padding: 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.markdown-content pre code {
+  background: none;
+  padding: 0;
+}
+
+.markdown-content blockquote {
+  border-left: 3px solid #d9d9d9;
+  padding-left: 12px;
+  margin: 8px 0;
+  color: #666;
+}
+
+.markdown-content hr {
+  border: none;
+  border-top: 1px solid #f0f0f0;
+  margin: 12px 0;
+}
+
+/* 内联引用标签 */
+.inline-citation {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: #f0f0f0;
+  color: #666;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.85em;
+  vertical-align: baseline;
+}
+
+/* 可点击的内联引用 */
+.inline-citation.clickable {
+  background: #e6f7ff;
+  color: #1890ff;
+  border-color: #91d5ff;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.inline-citation.clickable:hover {
+  background: #bae7ff;
+  border-color: #69c0ff;
+}
