@@ -64,7 +64,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: .
-          tauriScript: npx tauri build
+          tauriScript: npx tauri
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
