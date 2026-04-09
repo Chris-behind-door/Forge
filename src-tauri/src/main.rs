@@ -62,7 +62,7 @@ fn main() {
                 };
 
                 match sidecar_command.env("IPC_TOKEN", ipc_token.clone()).spawn() {
-                    Ok((rx, child)) => {
+                    Ok((mut rx, child)) => {
                         println!("[Forge] Backend sidecar started successfully (PID: {:?})", child.pid());
                         // Log sidecar output in a background thread
                         std::thread::spawn(move || {
