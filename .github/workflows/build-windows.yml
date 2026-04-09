@@ -44,7 +44,26 @@ jobs:
         working-directory: backend
         run: |
           .\.venv\Scripts\activate
-          pyinstaller --onefile --name backend --console src/main.py
+          pyinstaller --onefile --name backend --console `
+            --collect-all lancedb `
+            --collect-all fastembed `
+            --collect-all rapidocr_onnxruntime `
+            --collect-all fitz `
+            --collect-all pymupdf `
+            --collect-all langchain_text_splitters `
+            --collect-all llama_index `
+            --collect-all llama_index_workflows `
+            --hidden-import uvicorn.logging `
+            --hidden-import uvicorn.loops `
+            --hidden-import uvicorn.loops.auto `
+            --hidden-import uvicorn.protocols `
+            --hidden-import uvicorn.protocols.http `
+            --hidden-import uvicorn.protocols.http.auto `
+            --hidden-import uvicorn.protocols.websockets `
+            --hidden-import uvicorn.protocols.websockets.auto `
+            --hidden-import uvicorn.lifespan `
+            --hidden-import uvicorn.lifespan.on `
+            src/main.py
           New-Item -ItemType Directory -Force -Path ..\src-tauri\binaries
           Copy-Item dist\backend.exe ..\src-tauri\binaries\backend-x86_64-pc-windows-msvc.exe
 
