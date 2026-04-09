@@ -54,6 +54,9 @@ jobs:
           mkdir ..\src-tauri\binaries -ErrorAction SilentlyContinue
           copy dist\backend.exe ..\src-tauri\binaries\backend-x86_64-pc-windows-msvc.exe
 
+      - name: Install root dependencies (Tauri CLI)
+        run: npm install
+
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm install
