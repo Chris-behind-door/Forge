@@ -51,6 +51,7 @@ jobs:
           .\.venv\Scripts\activate
           pyinstaller --onefile --name backend --console src/main.py
           # Rename to Tauri sidecar naming convention
+          mkdir ..\src-tauri\binaries -ErrorAction SilentlyContinue
           copy dist\backend.exe ..\src-tauri\binaries\backend-x86_64-pc-windows-msvc.exe
 
       - name: Install frontend dependencies
