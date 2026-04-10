@@ -34,8 +34,15 @@
 
 .sider-menu {
   border-right: none !important;
+  flex-shrink: 0;
+}
+
+.sider-body {
   flex: 1;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .sider-footer {
@@ -86,10 +93,12 @@
 
 /* Responsive adjustments */
 
-/* Session list in sidebar */
-.session-divider {
-  border-top: 1px solid #e8e8e8;
-  margin: 0 12px;
+/* Session section in sidebar */
+.session-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .session-header {

@@ -123,41 +123,42 @@ function App() {
           items={menuItems}
           className="sider-menu"
         />
-        {currentView === 'chat' && (
-          <div className="session-section">
-            <div className="session-divider" />
-            <div className="session-header">
-              <span className="session-header-title">历史会话</span>
-              <Button
-                type="text"
-                size="small"
-                icon={<PlusOutlined />}
-                onClick={handleNewChat}
-                title="新建对话"
-              />
+        <div className="sider-body">
+          {currentView === 'chat' && (
+            <div className="session-section">
+              <div className="session-header">
+                <span className="session-header-title">历史会话</span>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={handleNewChat}
+                  title="新建对话"
+                />
+              </div>
+              <div className="session-list">
+                {sessions.map((s) => (
+                  <div
+                    key={s.id}
+                    className={`session-item${s.id === sessionId ? ' active' : ''}`}
+                    onClick={() => { setSessionId(s.id); setCurrentView('chat') }}
+                  >
+                    <span className="session-item-title" title={s.title}>
+                      {s.title || '新对话'}
+                    </span>
+                    <Button
+                      type="text"
+                      size="small"
+                      className="session-delete-btn"
+                      icon={<DeleteOutlined />}
+                      onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id) }}
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="session-list">
-              {sessions.map((s) => (
-                <div
-                  key={s.id}
-                  className={`session-item${s.id === sessionId ? ' active' : ''}`}
-                  onClick={() => { setSessionId(s.id); setCurrentView('chat') }}
-                >
-                  <span className="session-item-title" title={s.title}>
-                    {s.title || '新对话'}
-                  </span>
-                  <Button
-                    type="text"
-                    size="small"
-                    className="session-delete-btn"
-                    icon={<DeleteOutlined />}
-                    onClick={(e) => { e.stopPropagation(); handleDeleteSession(s.id) }}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+          )}
+        </div>
         <div className="sider-footer">
           <a className="api-guide-link" onClick={openApiGuide}>
             <QuestionCircleOutlined /> API 接入指南
