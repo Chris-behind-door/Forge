@@ -159,10 +159,11 @@ function App() {
             </div>
           )}
         </div>
-        <div className="sider-footer">
-          <a className="api-guide-link" onClick={openApiGuide}>
-            <QuestionCircleOutlined /> API 接入指南
-          </a>
+        <div className="sider-bottom-menu">
+          <div className="sider-menu-item" onClick={openApiGuide}>
+            <QuestionCircleOutlined />
+            <span>文档</span>
+          </div>
         </div>
       </Sider>
 
