@@ -220,9 +220,7 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
             )}
           </Card>
         ))}
-        {loading && messages[messages.length - 1]?.role !== 'loading' && (
-          <div className="loading"><Spin /></div>
-        )}
+
       </div>
 
       <div className="input-area">
