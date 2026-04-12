@@ -3,14 +3,25 @@ CHM 解析模块
 
 处理流程：
 1. 使用 7z 解压 CHM 文件到临时目录
-2. 遍历所有 HTML 文件
-3. 使用 BeautifulSoup 提取文本内容
-4. 使用 LangChain 进行文本分块
+2. 按一级子目录识别"文档"（每本规范/书籍）
+3. 每个 HTML 文件作为一个"章节"，提取标题
+4. 使用 BeautifulSoup 提取文本内容
+5. 分块时保留层级信息（parent_title + chapter）
 
-CHM 格式说明：
-- CHM (Compiled HTML Help) 是 Windows 帮助文件格式
-- 本质上是多个 HTML 文件的压缩包
-- 通常包含目录结构，每个章节是独立的 HTML 文件
+层级结构（CHM 特有）：
+  CHM 根目录
+  ├── 规范A/           ← 文档（parent）
+  │   ├── 001.html     ← 章节（chapter）
+  │   ├── 002.html
+  │   └── ...
+  ├── 规范B/
+  │   ├── 001.html
+  │   └── ...
+  └── 单文件.html       ← 无子目录，扁平处理
+
+分块输出格式：
+  每个 chunk 携带 parent_title（所属规范名）和 chapter（章节名），
+  编码到 text 中作为 [文档:xxx] 和 [章节:xxx] 标记。
 """
 
 import re
@@ -71,8 +82,6 @@ def _detect_encoding(html_content: bytes) -> str:
         head = html_content[:1024].decode("ascii", errors="ignore")
 
         # 查找 charset
-        import re
-
         match = re.search(r'charset=["\']?([^"\'>\s]+)', head, re.IGNORECASE)
         if match:
             charset = match.group(1).strip()
@@ -167,9 +176,9 @@ def _find_html_files(directory: str) -> list[Path]:
 
 def _extract_page_hint(filepath: Path, base_dir: Path) -> str | None:
     """
-    从文件路径提取"页码"提示（实际上是文件路径/章节名）
+    从文件路径提取位置标识
 
-    对于 CHM，没有真正的页码，我们用文件路径作为位置标识
+    对于 CHM，没有真正的页码，用文件路径作为位置标识
 
     Args:
         filepath: 文件路径
@@ -180,7 +189,6 @@ def _extract_page_hint(filepath: Path, base_dir: Path) -> str | None:
     """
     try:
         relative = filepath.relative_to(base_dir)
-        # 返回完整的 HTML 相对路径（如 "子目录/index.html"）
         return str(relative)
     except ValueError:
         return None
@@ -189,8 +197,7 @@ def _extract_page_hint(filepath: Path, base_dir: Path) -> str | None:
 def _extract_location_tag(text: str) -> str | None:
     """
     从文本中提取 [位置: xxx] 标记的值。
-    使用括号深度计数以正确处理 location 中的嵌套方括号
-    （如 "建筑抗震设计规范[附条文说明]/xxx.html"）。
+    使用括号深度计数以正确处理 location 中的嵌套方括号。
     """
     prefix = "[位置: "
     start = text.find(prefix)
@@ -210,13 +217,74 @@ def _extract_location_tag(text: str) -> str | None:
     return None
 
 
+def _extract_chapter_title(html_content: str) -> str | None:
+    """从 HTML 中提取章节标题。
+
+    优先级：<title> > <h1> > <h2> > <h3>
+    """
+    try:
+        soup = BeautifulSoup(html_content, "html.parser")
+        if soup.title and soup.title.string:
+            t = soup.title.string.strip()
+            if t:
+                return t[:200]
+        for tag_name in ("h1", "h2", "h3"):
+            tag = soup.find(tag_name)
+            if tag:
+                t = tag.get_text(strip=True)
+                if t:
+                    return t[:200]
+    except Exception:
+        pass
+    return None
+
+
+def _is_system_dir(name: str) -> bool:
+    """判断是否为 CHM 内部系统目录（非内容目录）。"""
+    system_prefixes = ("$", "img", "images", "css", "style", "script", "js")
+    return any(name.lower().startswith(p) for p in system_prefixes)
+
+
+def _process_html_file(
+    html_file: Path,
+    base_dir: Path,
+) -> tuple[str | None, str, str | None]:
+    """解析单个 HTML 文件。
+
+    Returns:
+        (location, extracted_text, chapter_title)
+    """
+    with open(html_file, "rb") as f:
+        raw_content = f.read()
+
+    encoding = _detect_encoding(raw_content)
+    html_content = raw_content.decode(encoding, errors="replace")
+
+    text = _extract_text_from_html(html_content)
+    location = _extract_page_hint(html_file, base_dir)
+    chapter_title = _extract_chapter_title(html_content)
+
+    return location, text, chapter_title
+
+
 def parse_chm(
     chm_path: str,
     chunk_size: int = 500,
     chunk_overlap: int = 50,
 ) -> list[dict]:
     """
-    解析 CHM 文件：解压 + HTML提取 + 分块
+    解析 CHM 文件：解压 + 层级识别 + HTML提取 + 分块
+
+    层级策略：
+    - 一级子目录 → "文档"（parent），目录名即文档标题
+    - 每个 HTML 文件 → "章节"（chapter），从 <title> 或 <h1> 提取标题
+    - 根目录下的 HTML → 扁平处理，无 parent
+
+    每个 chunk 的 text 前会加上层级标记：
+      [文档: 建筑抗震设计规范[附条文说明]]
+      [章节: 5.2 场地抗震性能评价]
+      [位置: 建筑抗震设计规范/005.html]
+      实际内容...
 
     Args:
         chm_path: CHM 文件路径
@@ -226,7 +294,6 @@ def parse_chm(
     Returns:
         分块列表
     """
-    # 解压到持久目录（stored_path 同级的 {stem}_extracted/）
     chm_p = Path(chm_path)
     extract_dir = chm_p.parent / f"{chm_p.stem}_extracted"
     if extract_dir.exists():
@@ -236,88 +303,102 @@ def parse_chm(
         if not _extract_chm(chm_path, str(extract_dir)):
             raise RuntimeError(f"无法解压 CHM 文件: {chm_path}")
 
-        html_files = _find_html_files(str(extract_dir))
+        # ---- 阶段 1：识别层级结构 ----
+        subdirs: list[Path] = []
+        root_htmls: list[Path] = []
 
-        if not html_files:
-            print(f"[CHM解析] 未找到 HTML 文件: {chm_path}")
-            return []
+        for child in sorted(extract_dir.iterdir()):
+            if child.is_dir() and not _is_system_dir(child.name):
+                subdirs.append(child)
+            elif child.is_file() and child.suffix.lower() in (".htm", ".html"):
+                root_htmls.append(child)
 
-        print(f"[CHM解析] 找到 {len(html_files)} 个 HTML 文件")
+        # ---- 阶段 2：按文档分组提取 ----
+        # 每个 section: (parent_title, chapter_title, location, text)
+        sections: list[tuple[str | None, str | None, str | None, str]] = []
 
-        # 提取所有 HTML 的文本
-        all_texts = []
-        base_dir = extract_dir
+        for subdir in subdirs:
+            parent_title = subdir.name
+            html_files = _find_html_files(str(subdir))
 
-        for html_file in html_files:
+            if not html_files:
+                continue
+
+            for html_file in html_files:
+                try:
+                    location, text, chapter_title = _process_html_file(
+                        html_file, extract_dir
+                    )
+                    if text.strip():
+                        sections.append((parent_title, chapter_title, location, text))
+                except Exception as e:
+                    print(f"[CHM解析] 解析 HTML 失败 {html_file}: {e}")
+                    continue
+
+        for html_file in root_htmls:
             try:
-                # 先以二进制读取，检测编码后再解码
-                with open(html_file, "rb") as f:
-                    raw_content = f.read()
-
-                encoding = _detect_encoding(raw_content)
-                html_content = raw_content.decode(encoding, errors="replace")
-
-                text = _extract_text_from_html(html_content)
-
+                location, text, chapter_title = _process_html_file(
+                    html_file, extract_dir
+                )
                 if text.strip():
-                    # 获取位置标识
-                    location = _extract_page_hint(html_file, base_dir)
-                    all_texts.append((location, text))
-
+                    sections.append((None, chapter_title, location, text))
             except Exception as e:
                 print(f"[CHM解析] 解析 HTML 失败 {html_file}: {e}")
                 continue
 
-        # 合并文本，添加位置标记
-        full_text = ""
-        for location, text in all_texts:
-            if location:
-                full_text += f"\n\n[位置: {location}]\n\n{text}"
-            else:
-                full_text += f"\n\n{text}"
-
-        full_text = full_text.strip()
-
-        if not full_text:
+        if not sections:
+            print(f"[CHM解析] 未提取到有效文本: {chm_path}")
             return []
 
-        # 使用 LangChain 进行文本分块
+        # ---- 阶段 3：按章节分块（保留层级标记） ----
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             separators=["\n\n", "\n", "。", "；", "，", " ", ""],
         )
 
-        chunks = splitter.split_text(full_text)
+        result: list[dict] = []
+        chunk_id = 0
 
-        # 提取位置标记
-        location_markers = []
-        for i, chunk in enumerate(chunks):
-            loc = _extract_location_tag(chunk)
-            if loc:
-                location_markers.append((i, loc))
+        for parent_title, chapter_title, location, text in sections:
+            # 构建层级标记前缀
+            header_parts: list[str] = []
+            if parent_title:
+                header_parts.append(f"[文档: {parent_title}]")
+            if chapter_title:
+                header_parts.append(f"[章节: {chapter_title}]")
+            if location:
+                header_parts.append(f"[位置: {location}]")
 
-        # 构建分块对象
-        result = []
-        for i, chunk in enumerate(chunks):
-            # 从当前分块提取位置
-            location = _extract_location_tag(chunk)
-            if not location:
-                # 当前分块没有位置标记，向前查找
-                for marker_idx, marker_loc in reversed(location_markers):
-                    if marker_idx < i:
-                        location = marker_loc
-                        break
+            header = "\n".join(header_parts)
 
-            result.append(
-                {
-                    "chunk_id": i,
-                    "text": chunk,
-                    "page": None,  # CHM 没有页码
-                    "location": location,  # 用 location 代替 page
-                }
-            )
+            # 对章节文本分块
+            chunks = splitter.split_text(text)
 
+            for ci, chunk_text in enumerate(chunks):
+                if ci == 0:
+                    full_text = f"{header}\n{chunk_text}" if header else chunk_text
+                else:
+                    loc_tag = f"[位置: {location}]" if location else ""
+                    full_text = f"{loc_tag}\n{chunk_text}" if loc_tag else chunk_text
+
+                result.append(
+                    {
+                        "chunk_id": chunk_id,
+                        "text": full_text,
+                        "page": None,
+                        "location": location,
+                        "parent_title": parent_title,
+                        "chapter": chapter_title,
+                    }
+                )
+                chunk_id += 1
+
+        print(
+            f"[CHM解析] {chm_p.name}: "
+            f"{len(subdirs)} 个文档, {len(sections)} 个章节, "
+            f"{len(result)} 个分块"
+        )
         return result
 
     finally:
