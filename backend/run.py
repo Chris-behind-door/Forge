@@ -10,4 +10,9 @@ from src.main import app
 import uvicorn
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8765)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=None)
+    args = parser.parse_args()
+    port = args.port or int(os.environ.get("FORGE_PORT", 8765))
+    uvicorn.run(app, host="127.0.0.1", port=port)
