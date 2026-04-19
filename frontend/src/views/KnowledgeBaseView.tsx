@@ -26,7 +26,7 @@ import './KnowledgeBaseView.css'
 // ============ 类型定义 ============
 
 /** 后端 API 基础地址 */
-const API_BASE = 'http://127.0.0.1:8765'
+import { getApiBase } from '../api'
 
 /** 文档数据结构 */
 interface Document {
@@ -96,7 +96,7 @@ function KnowledgeBaseView() {
   const waitForBackend = useCallback(async (maxRetries = 10, retryDelay = 500) => {
     for (let i = 0; i < maxRetries; i++) {
       try {
-        const res = await fetch(`${API_BASE}/health`, { 
+        const res = await fetch(`${getApiBase()}/health`, { 
           signal: AbortSignal.timeout(2000) 
         })
         if (res.ok) return true
@@ -125,7 +125,7 @@ function KnowledgeBaseView() {
     }
 
     try {
-      const res = await fetch(`${API_BASE}/documents`)
+      const res = await fetch(`${getApiBase()}/documents`)
       if (!res.ok) throw new Error('获取文档列表失败')
       const data = await res.json()
       setDocuments(data.documents)
@@ -170,7 +170,7 @@ function KnowledgeBaseView() {
   /** 上传单个文件到后端 */
   const uploadFile = async (filePath: string): Promise<boolean> => {
     try {
-      const res = await fetch(`${API_BASE}/documents/upload`, {
+      const res = await fetch(`${getApiBase()}/documents/upload`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ file_path: filePath }),
@@ -287,7 +287,7 @@ function KnowledgeBaseView() {
 
   const handleDelete = async (docId: string) => {
     try {
-      const res = await fetch(`${API_BASE}/documents/${docId}`, {
+      const res = await fetch(`${getApiBase()}/documents/${docId}`, {
         method: 'DELETE',
       })
       
@@ -304,7 +304,7 @@ function KnowledgeBaseView() {
 
   const handleReprocess = async (docId: string) => {
     try {
-      const res = await fetch(`${API_BASE}/documents/${docId}/reprocess`, {
+      const res = await fetch(`${getApiBase()}/documents/${docId}/reprocess`, {
         method: 'POST',
       })
       
@@ -323,7 +323,7 @@ function KnowledgeBaseView() {
   const handleReprocessAll = async () => {
     setReprocessingAll(true)
     try {
-      const res = await fetch(`${API_BASE}/documents/reprocess-all`, {
+      const res = await fetch(`${getApiBase()}/documents/reprocess-all`, {
         method: 'POST',
       })
       

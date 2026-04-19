@@ -4,6 +4,8 @@
  * A desktop app for querying engineering documents.
  */
 import { useState, useEffect, useCallback } from 'react'
+import { listen } from '@tauri-apps/api/event'
+import { setBackendPort, getApiBase } from './api'
 import { Layout, Menu, Button } from 'antd'
 import { MessageOutlined, BookOutlined, SettingOutlined, PlusOutlined, DeleteOutlined, QuestionCircleOutlined } from '@ant-design/icons'
 import { open } from '@tauri-apps/plugin-shell'
@@ -41,16 +43,24 @@ interface SessionInfo {
   message_count: number
 }
 
-const API_BASE = 'http://127.0.0.1:8765'
 
 function App() {
   const [currentView, setCurrentView] = useState<ViewType>('chat')
+
+  // Listen for dynamic backend port from Tauri
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    listen<number>('backend-port', (event) => {
+      setBackendPort(event.payload)
+    }).then(fn => { unlisten = fn }).catch(() => {/* not in Tauri */ })
+    return () => { unlisten?.() }
+  }, [])
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [sessions, setSessions] = useState<SessionInfo[]>([])
 
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/sessions`)
+      const res = await fetch(`${getApiBase()}/sessions`)
       if (res.ok) {
         setSessions(await res.json())
       }
@@ -63,7 +73,7 @@ function App() {
     const poll = async () => {
       while (!cancelled) {
         try {
-          const res = await fetch(`${API_BASE}/health`)
+          const res = await fetch(`${getApiBase()}/health`)
           if (res.ok) break
         } catch { /* not ready yet */ }
         await new Promise(r => setTimeout(r, 1000))
@@ -81,7 +91,7 @@ function App() {
 
   const handleNewChat = useCallback(async (): Promise<string> => {
     try {
-      const res = await fetch(`${API_BASE}/sessions`, { method: 'POST' })
+      const res = await fetch(`${getApiBase()}/sessions`, { method: 'POST' })
       if (res.ok) {
         const session = await res.json()
         setSessionId(session.id)
@@ -94,7 +104,7 @@ function App() {
 
   const handleDeleteSession = useCallback(async (id: string) => {
     try {
-      await fetch(`${API_BASE}/sessions/${id}`, { method: 'DELETE' })
+      await fetch(`${getApiBase()}/sessions/${id}`, { method: 'DELETE' })
       if (id === sessionId) {
         setSessionId(null)
       }

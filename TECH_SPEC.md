@@ -519,22 +519,22 @@ cargo tauri build
 - [x] 引用标签可点击跳转（PDF 打开到指定页码，CHM 浏览器查看 HTML）
 - [x] CHM HTML 资源服务（图片/CSS/JS + 编码检测 + URL 重写）
 - [x] 纯 BYOK 模式确认，废弃 proxy 中转服务器
-- [ ] LlamaIndex Workflow 集成
-- [ ] ~~分流智能体~~ → 由主 Agent 自行判断查哪边，不单独分
-- [ ] keyring 安全存储 API Key
+- [x] LlamaIndex Workflow 集成（QueryWorkflow: ToolCallStep → ExpandContextStep → GenerateStep）
+- [x] ~~分流智能体~~ → 由主 Agent 自行判断查哪边，不单独分（已取消）
+- [x] keyring 安全存储 API Key
 
-### Phase 3: 进阶功能
+### Phase 3: 进阶功能（计划: 下周末启动图数据库）
 
-- [ ] Kùzu 图数据库集成
+- [ ] 图数据库集成（Kùzu 或 SQLite+邻接表，待评估）
 - [ ] 会议纪要关联查询
-- [ ] Docling 高级 PDF 解析（表格、公式）
-- [ ] 多格式支持（DOCX/PPTX/HTML）
-- [ ] 端口动态分配
+- [ ] Docling 高级文档解析（表格、公式、DOCX/PPTX/HTML 多格式）
+- [ ] 端口动态分配 ← 当前任务
 - [ ] 性能优化
 
 ### Phase 4: 发布与文档
 
 - [ ] 跨平台打包测试（macOS/Windows/Linux）
+- [ ] GitHub Actions CI（Windows 已跑通）
 - [ ] 用户文档
 - [ ] 开源发布
 

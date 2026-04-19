@@ -219,6 +219,14 @@ async def query(request: QueryRequest) -> QueryResponse:
 
 
 if __name__ == "__main__":
+    import argparse
+    import os
+
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8765)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=None)
+    args = parser.parse_args()
+    port = args.port or int(os.environ.get("FORGE_PORT", 8765))
+
+    uvicorn.run(app, host="127.0.0.1", port=port)

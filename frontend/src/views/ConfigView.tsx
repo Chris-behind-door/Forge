@@ -32,7 +32,7 @@ interface CustomProfile {
   model: string
 }
 
-const API_BASE = 'http://127.0.0.1:8765'
+import { getApiBase } from '../api'
 const CUSTOM_PROFILES_KEY = 'llm_custom_profiles'
 const PROVIDER_MODELS_KEY = 'llm_provider_models_v2'
 
@@ -70,7 +70,7 @@ function ConfigView() {
     try {
       const headers: Record<string, string> = {}
       if (ipcToken) headers['Authorization'] = `Bearer ${ipcToken}`
-      const res = await fetch(`${API_BASE}/config/llm`, { headers })
+      const res = await fetch(`${getApiBase()}/config/llm`, { headers })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data: LlmConfig = await res.json()
       setConfig(data)
@@ -143,7 +143,7 @@ function ConfigView() {
         body.provider = preset.startsWith('custom:') ? 'custom' : preset
       }
 
-      const res = await fetch(`${API_BASE}/config/llm/test`, {
+      const res = await fetch(`${getApiBase()}/config/llm/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -172,7 +172,7 @@ function ConfigView() {
       if (model) body.model = model
       if (baseUrl) body.base_url = baseUrl
 
-      const res = await fetch(`${API_BASE}/config/llm`, { method: 'POST', headers, body: JSON.stringify(body) })
+      const res = await fetch(`${getApiBase()}/config/llm`, { method: 'POST', headers, body: JSON.stringify(body) })
       if (!res.ok) { const err = await res.json().catch(() => null); throw new Error(err?.detail || `HTTP ${res.status}`) }
 
       message.success('配置已保存')
@@ -192,7 +192,7 @@ function ConfigView() {
       try {
         const headers: Record<string, string> = { 'Content-Type': 'application/json' }
         if (ipcToken) headers['Authorization'] = `Bearer ${ipcToken}`
-        await fetch(`${API_BASE}/config/llm`, {
+        await fetch(`${getApiBase()}/config/llm`, {
           method: 'POST',
           headers,
           body: JSON.stringify({ provider: 'custom', api_key: apiKey, model, base_url: baseUrl }),
@@ -204,7 +204,7 @@ function ConfigView() {
       try {
         const headers: Record<string, string> = { 'Content-Type': 'application/json' }
         if (ipcToken) headers['Authorization'] = `Bearer ${ipcToken}`
-        await fetch(`${API_BASE}/config/llm`, {
+        await fetch(`${getApiBase()}/config/llm`, {
           method: 'POST',
           headers,
           body: JSON.stringify({ provider: 'custom', model, base_url: baseUrl, migrate_from: sourceProvider }),

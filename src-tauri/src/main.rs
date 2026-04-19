@@ -2,10 +2,22 @@
 // TODO: remove this line once sidecar is stable
 // #![cfg_attr(all(not(debug_assertions), not(feature = "console")), windows_subsystem = "windows")]
 
+use std::net::TcpListener;
 use std::process::Command;
 use tauri::Emitter;
 use tauri_plugin_shell::ShellExt;
 use uuid::Uuid;
+
+/// Try to bind to `base_port + i` for i in 0..max_tries, return first available.
+fn find_available_port(base_port: u16, max_tries: u16) -> Option<u16> {
+    (0..max_tries).find_map(|offset| {
+        let port = base_port + offset;
+        // TcpListener::bind will fail if port is taken
+        TcpListener::bind(("127.0.0.1", port))
+            .ok()
+            .map(|_| port)
+    })
+}
 
 fn main() {
     tauri::Builder::default()
@@ -15,6 +27,10 @@ fn main() {
         .setup(|app| {
             // Generate IPC Token for backend authentication
             let ipc_token = Uuid::new_v4().to_string();
+
+            // Find an available port for the backend
+            let backend_port = find_available_port(8765, 100)
+                .expect("No available port found in range 8765-8864");
 
             // In dev mode: run uvicorn on the backend source code directly
             // In prod mode: run the bundled sidecar binary
@@ -33,6 +49,7 @@ fn main() {
 
                 println!("Starting backend from: {:?}", backend_dir);
                 println!("Using uvicorn: {:?}", venv_uvicorn);
+                println!("Backend port: {}", backend_port);
 
                 // Run uvicorn using venv's python
                 let _child = Command::new(&venv_python)
@@ -40,7 +57,7 @@ fn main() {
                         &venv_uvicorn.to_string_lossy(),
                         "src.main:app",
                         "--host", "127.0.0.1",
-                        "--port", "8765",
+                        "--port", &backend_port.to_string(),
                         "--reload",
                     ])
                     .current_dir(&backend_dir)
@@ -50,6 +67,7 @@ fn main() {
             } else {
                 // Prod mode: use bundled sidecar binary
                 println!("[Forge] Attempting to start backend sidecar...");
+                println!("[Forge] Backend port: {}", backend_port);
 
                 let sidecar_command = match app.shell().sidecar("binaries/backend") {
                     Ok(cmd) => cmd,
@@ -57,11 +75,16 @@ fn main() {
                         eprintln!("[Forge] ERROR: Failed to create sidecar command: {}", e);
                         eprintln!("[Forge] The application will start without the backend.");
                         app.emit("ipc-token", &ipc_token).ok();
+                        app.emit("backend-port", backend_port).ok();
                         return Ok(());
                     }
                 };
 
-                match sidecar_command.env("IPC_TOKEN", ipc_token.clone()).spawn() {
+                match sidecar_command
+                    .env("IPC_TOKEN", ipc_token.clone())
+                    .env("FORGE_PORT", backend_port.to_string())
+                    .spawn()
+                {
                     Ok((mut rx, child)) => {
                         println!("[Forge] Backend sidecar started successfully (PID: {:?})", child.pid());
                         // Log sidecar output in a background thread
@@ -94,9 +117,12 @@ fn main() {
             // Give backend time to start
             std::thread::sleep(std::time::Duration::from_millis(1000));
 
-            // Send IPC Token to frontend
+            // Send IPC Token and backend port to frontend
             if let Err(e) = app.emit("ipc-token", &ipc_token) {
                 eprintln!("[Forge] Failed to emit ipc-token: {}", e);
+            }
+            if let Err(e) = app.emit("backend-port", backend_port) {
+                eprintln!("[Forge] Failed to emit backend-port: {}", e);
             }
 
             Ok(())

@@ -36,7 +36,7 @@ interface ChatViewProps {
 let messageId = 0
 const nextMessageId = () => ++messageId
 
-const API_BASE = 'http://127.0.0.1:8765'
+import { getApiBase } from '../api'
 
 const { TextArea } = Input
 
@@ -61,7 +61,7 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
     }
     ;(async () => {
       try {
-        const res = await fetch(`${API_BASE}/sessions/${sessionId}`)
+        const res = await fetch(`${getApiBase()}/sessions/${sessionId}`)
         if (res.ok) {
           const data = await res.json()
           const loaded: Message[] = (data.messages || []).map(
@@ -82,21 +82,21 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
   /** 点击内联引用标签的处理 — 在浏览器中打开原文位置 */
   const handleCitationClick = useCallback(async (c: Citation) => {
     try {
-      const res = await fetch(`${API_BASE}/documents/${c.doc_id}/chunks/${c.chunk_index}`)
+      const res = await fetch(`${getApiBase()}/documents/${c.doc_id}/chunks/${c.chunk_index}`)
       if (!res.ok) throw new Error('获取 chunk 详情失败')
       const detail = await res.json()
 
       if (detail.file_type === 'chm') {
         const chmLocation = detail.location || c.location
         if (chmLocation && chmLocation.includes('/')) {
-          const url = `${API_BASE}/documents/${c.doc_id}/chm-html?` +
+          const url = `${getApiBase()}/documents/${c.doc_id}/chm-html?` +
             new URLSearchParams({ path: chmLocation })
           open(url)
         } else {
           message.info('该引用暂无精确定位，请查阅原文')
         }
       } else if (detail.file_type === 'pdf') {
-        let url = `${API_BASE}/documents/${c.doc_id}/file`
+        let url = `${getApiBase()}/documents/${c.doc_id}/file`
         const page = detail.page ?? c.page
         if (page) url += `#page=${page}`
         open(url)
@@ -129,7 +129,7 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
 
       const body: { question: string; session_id: string } = { question: input, session_id: sid }
 
-      const response = await fetch('http://127.0.0.1:8765/query', {
+      const response = await fetch(`${getApiBase()}/query`, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
