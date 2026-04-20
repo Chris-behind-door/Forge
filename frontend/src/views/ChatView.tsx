@@ -12,12 +12,13 @@
  * - Shift+Enter 换行
  */
 import { useState, useCallback, useEffect } from 'react'
-import { Input, Button, Card, Spin, message } from 'antd'
+import { Input, Button, Card, Spin, message, Select } from 'antd'
 import { SendOutlined, PlusOutlined } from '@ant-design/icons'
 import { open } from '@tauri-apps/plugin-shell'
 import { listen } from '@tauri-apps/api/event'
 import MarkdownContent from '../components/MarkdownContent'
 import type { Citation } from '../types'
+import { useProjects } from '../hooks/useProjects'
 import './ChatView.css'
 
 interface Message {
@@ -45,6 +46,8 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
   const [ipcToken, setIpcToken] = useState<string | null>(null)
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const { projects } = useProjects()
 
   useEffect(() => {
     const unlisten = listen<string>('ipc-token', (event) => {
@@ -127,7 +130,8 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
         sid = await onNewChat()
       }
 
-      const body: { question: string; session_id: string } = { question: input, session_id: sid }
+      const body: { question: string; session_id: string; project_id?: string } = { question: input, session_id: sid }
+      if (selectedProjectId) body.project_id = selectedProjectId
 
       const response = await fetch(`${getApiBase()}/query`, {
         method: 'POST',
@@ -224,23 +228,39 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
       </div>
 
       <div className="input-area">
-        <TextArea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="输入问题... (Enter 发送, Shift+Enter 换行)"
-          autoSize={{ minRows: 2, maxRows: 4 }}
-          disabled={loading}
-        />
-        <Button
-          type="primary"
-          icon={<SendOutlined />}
-          onClick={handleSend}
-          loading={loading}
-          disabled={!input.trim()}
-        >
-          发送
-        </Button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+          <TextArea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="输入问题... (Enter 发送, Shift+Enter 换行)"
+            autoSize={{ minRows: 2, maxRows: 4 }}
+            disabled={loading}
+            style={{ flex: 1 }}
+          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <Select
+              size="small"
+              value={selectedProjectId ?? undefined}
+              onChange={(v) => setSelectedProjectId(v === '__general__' ? null : v)}
+              style={{ minWidth: 120 }}
+              placeholder="通用知识"
+              options={[
+                { value: '__general__', label: '通用知识' },
+                ...projects.map(p => ({ value: p.id, label: p.name })),
+              ]}
+            />
+            <Button
+              type="primary"
+              icon={<SendOutlined />}
+              onClick={handleSend}
+              loading={loading}
+              disabled={!input.trim()}
+            >
+              发送
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   )

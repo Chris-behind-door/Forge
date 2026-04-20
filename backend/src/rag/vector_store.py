@@ -187,10 +187,14 @@ def search_similar(query: str, top_k: int = 5, project_id: str | None = None) ->
     # 向量检索：获取更多候选
     query_vector = embed_query(query)
     search_obj = table.search(query_vector).limit(top_k * 3)
-    # 按 project_id 过滤：指定项目时返回该项目 + 通用知识
+    # 按 project_id 过滤：
+    #   指定项目 → 该项目 + 通用知识
+    #   不指定 → 只查通用知识
     if project_id is not None:
         safe_pid = project_id.replace("'", "''")
         search_obj = search_obj.where(f"project_id = '{safe_pid}' OR project_id IS NULL")
+    else:
+        search_obj = search_obj.where("project_id IS NULL")
     candidates = search_obj.to_pydantic(ChunkRecord)
 
     if not candidates:

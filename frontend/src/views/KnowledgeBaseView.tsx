@@ -11,7 +11,7 @@
  * - 轮询时静默更新，避免 UI 闪烁
  */
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Button, Card, List, Tag, message, Popconfirm, Empty } from 'antd'
+import { Button, Card, List, Tag, message, Popconfirm, Empty, Select, Modal, Input, Form } from 'antd'
 import {
   UploadOutlined,
   FilePdfOutlined,
@@ -20,8 +20,12 @@ import {
   InboxOutlined,
   ReloadOutlined,
   SyncOutlined,
+  PlusOutlined,
+  EditOutlined,
+  FolderOutlined,
 } from '@ant-design/icons'
 import './KnowledgeBaseView.css'
+import { useProjects } from '../hooks/useProjects'
 
 // ============ 类型定义 ============
 
@@ -84,7 +88,38 @@ function KnowledgeBaseView() {
   const [uploading, setUploading] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [reprocessingAll, setReprocessingAll] = useState(false) // 重新处理全部
+  const [uploadProjectId, setUploadProjectId] = useState<string | null>(null)
   const lastDropTimeRef = useRef<number>(0)
+
+  // -------- 项目管理 --------
+  const { projects, createProject, updateProject, deleteProject } = useProjects()
+  const [projectModalOpen, setProjectModalOpen] = useState(false)
+  const [editingProject, setEditingProject] = useState<{ id: string; name: string; description: string } | null>(null)
+  const [projectForm] = Form.useForm()
+
+  const handleCreateProject = () => {
+    setEditingProject(null)
+    projectForm.resetFields()
+    setProjectModalOpen(true)
+  }
+
+  const handleEditProject = (project: { id: string; name: string; description?: string }) => {
+    setEditingProject({ id: project.id, name: project.name, description: project.description || '' })
+    projectForm.setFieldsValue({ name: project.name, description: project.description || '' })
+    setProjectModalOpen(true)
+  }
+
+  const handleProjectModalOk = async () => {
+    try {
+      const values = await projectForm.validateFields()
+      if (editingProject) {
+        await updateProject(editingProject.id, values)
+      } else {
+        await createProject(values.name, values.description)
+      }
+      setProjectModalOpen(false)
+    } catch { /* validation failed */ }
+  }
 
   // -------- 数据获取 --------
 
@@ -170,10 +205,12 @@ function KnowledgeBaseView() {
   /** 上传单个文件到后端 */
   const uploadFile = async (filePath: string): Promise<boolean> => {
     try {
+      const body: Record<string, string | null> = { file_path: filePath }
+      if (uploadProjectId) body.project_id = uploadProjectId
       const res = await fetch(`${getApiBase()}/documents/upload`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_path: filePath }),
+        body: JSON.stringify(body),
       })
 
       if (res.ok) {
@@ -350,8 +387,81 @@ function KnowledgeBaseView() {
         </p>
       </div>
 
+      {/* 项目管理 */}
+      <Card
+        className="project-card"
+        title={<><FolderOutlined /> 项目管理</>}
+        extra={<Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleCreateProject}>新建项目</Button>}
+      >
+        <List
+          size="small"
+          dataSource={[
+            // "通用知识" 特殊项
+            { id: '__general__', name: '通用知识', description: '未归属项目的文档', isSpecial: true as const },
+            ...projects.map(p => ({ ...p, isSpecial: false as const })),
+          ]}
+          renderItem={(item) => (
+            <List.Item
+              actions={
+                item.isSpecial
+                  ? undefined
+                  : [
+                      <Button key="edit" type="text" icon={<EditOutlined />} size="small" onClick={() => handleEditProject(item)} />,
+                      <Popconfirm
+                        key="delete"
+                        title="确认删除此项目？"
+                        description="项目下的文档将移至通用知识"
+                        onConfirm={() => deleteProject(item.id)}
+                        okText="删除"
+                        cancelText="取消"
+                      >
+                        <Button type="text" danger icon={<DeleteOutlined />} size="small" />
+                      </Popconfirm>,
+                    ]
+              }
+            >
+              <List.Item.Meta
+                title={item.isSpecial ? <><Tag color="blue">默认</Tag>{item.name}</> : item.name}
+                description={item.description}
+              />
+            </List.Item>
+          )}
+        />
+      </Card>
+
+      <Modal
+        title={editingProject ? '编辑项目' : '新建项目'}
+        open={projectModalOpen}
+        onOk={handleProjectModalOk}
+        onCancel={() => setProjectModalOpen(false)}
+        okText={editingProject ? '保存' : '创建'}
+        cancelText="取消"
+      >
+        <Form form={projectForm} layout="vertical">
+          <Form.Item name="name" label="项目名称" rules={[{ required: true, message: '请输入项目名称' }]}>
+            <Input placeholder="输入项目名称" />
+          </Form.Item>
+          <Form.Item name="description" label="项目描述">
+            <Input.TextArea placeholder="输入项目描述（可选）" rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
       {/* 上传区域 */}
       <Card className="upload-card">
+        <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>导入到：</span>
+          <Select
+            value={uploadProjectId ?? undefined}
+            onChange={(v) => setUploadProjectId(v === '__general__' ? null : v)}
+            style={{ minWidth: 160 }}
+            placeholder="选择项目"
+            options={[
+              { value: '__general__', label: '通用知识' },
+              ...projects.map(p => ({ value: p.id, label: p.name })),
+            ]}
+          />
+        </div>
         <div
           className={`upload-area ${isDragging ? 'dragging' : ''}`}
           onClick={handleSelectFiles}
