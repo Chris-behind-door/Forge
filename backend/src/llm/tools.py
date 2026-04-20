@@ -4,10 +4,14 @@
 
 import logging
 from typing import Any
+from contextvars import ContextVar
 
 from ..rag.vector_store import search_similar
 
 logger = logging.getLogger(__name__)
+
+# Context variable for project-scoped search
+_current_project_id: ContextVar[str | None] = ContextVar('_current_project_id', default=None)
 
 # ============ 工具定义（OpenAI function calling 格式）============
 
@@ -68,7 +72,8 @@ def _search_knowledge_base(query: str, top_k: int = 5) -> tuple[str, list[dict]]
     Returns:
         (格式化文本, 检索结果元数据列表)
     """
-    results = search_similar(query, top_k=top_k)
+    project_id = _current_project_id.get()
+    results = search_similar(query, top_k=top_k, project_id=project_id)
 
     if not results:
         return f"未找到与「{query}」相关的内容。", []

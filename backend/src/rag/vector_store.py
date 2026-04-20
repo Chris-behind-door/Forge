@@ -38,6 +38,7 @@ class ChunkRecord(LanceModel):
     text: str = Field(description="分块文本")
     page: int | None = Field(default=None, description="页码（PDF）")
     location: str | None = Field(default=None, description="位置标识（CHM等）")
+    project_id: str | None = Field(default=None, description="所属项目，null 表示通用知识")
     vector: Vector(EMBEDDING_DIM) = Field(description="嵌入向量")
 
 
@@ -94,7 +95,7 @@ def _compute_keyword_score(query: str, text: str) -> float:
     return score
 
 
-def add_chunks(doc_id: str, chunks: list[dict]) -> int:
+def add_chunks(doc_id: str, chunks: list[dict], project_id: str | None = None) -> int:
     """
     添加文档分块到向量存储
 
@@ -124,6 +125,7 @@ def add_chunks(doc_id: str, chunks: list[dict]) -> int:
             text=chunk["text"],
             page=chunk.get("page"),
             location=chunk.get("location"),
+            project_id=project_id,
             vector=embeddings[i],
         )
         records.append(record)
@@ -159,7 +161,7 @@ def delete_doc_chunks(doc_id: str) -> int:
     return count_before - count_after
 
 
-def search_similar(query: str, top_k: int = 5) -> list[dict[str, Any]]:
+def search_similar(query: str, top_k: int = 5, project_id: str | None = None) -> list[dict[str, Any]]:
     """
     混合检索：向量语义 + 关键词匹配
 
@@ -184,7 +186,12 @@ def search_similar(query: str, top_k: int = 5) -> list[dict[str, Any]]:
 
     # 向量检索：获取更多候选
     query_vector = embed_query(query)
-    candidates = table.search(query_vector).limit(top_k * 3).to_pydantic(ChunkRecord)
+    search_obj = table.search(query_vector).limit(top_k * 3)
+    # 按 project_id 过滤：指定项目时返回该项目 + 通用知识
+    if project_id is not None:
+        safe_pid = project_id.replace("'", "''")
+        search_obj = search_obj.where(f"project_id = '{safe_pid}' OR project_id IS NULL")
+    candidates = search_obj.to_pydantic(ChunkRecord)
 
     if not candidates:
         return []

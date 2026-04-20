@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from ..parsers.chm import parse_chm
@@ -45,6 +45,7 @@ class DocumentUploadRequest(BaseModel):
     """文件上传请求（本地文件路径）"""
 
     file_path: str
+    project_id: str | None = None  # 所属项目，null 表示通用知识
 
 
 class Document(BaseModel):
@@ -60,6 +61,7 @@ class Document(BaseModel):
     uploaded_at: str
     chunk_count: int | None = None
     status: str = "pending"  # pending, processing, ready, error
+    project_id: str | None = None  # 所属项目，null 表示通用知识
 
 
 class DocumentListResponse(BaseModel):
@@ -168,7 +170,7 @@ async def process_document(
         step_start = datetime.now()
         _log(f"[{doc_id[:8]}] 开始向量化...")
 
-        chunk_count = await loop.run_in_executor(None, add_chunks, doc_id, chunks)
+        chunk_count = await loop.run_in_executor(None, add_chunks, doc_id, chunks, doc.project_id)
 
         elapsed = (datetime.now() - step_start).total_seconds()
         _log(f"[{doc_id[:8]}] 向量化完成: {chunk_count} 个向量, 耗时 {elapsed:.2f}s")
@@ -308,6 +310,7 @@ async def upload_document(request: DocumentUploadRequest) -> Document:
         stored_path=str(stored_path),
         uploaded_at=datetime.now().isoformat(),
         status="pending",
+        project_id=request.project_id,
     )
 
     metadata[doc_id] = document
@@ -320,10 +323,13 @@ async def upload_document(request: DocumentUploadRequest) -> Document:
 
 
 @router.get("", response_model=DocumentListResponse)
-async def list_documents() -> DocumentListResponse:
-    """列出所有已上传的文档"""
+async def list_documents(project_id: str | None = Query(default=None)) -> DocumentListResponse:
+    """列出已上传的文档，可按 project_id 筛选"""
     metadata = _load_metadata()
-    documents = list(metadata.values())
+    if project_id is not None:
+        documents = [d for d in metadata.values() if d.project_id == project_id]
+    else:
+        documents = list(metadata.values())
     return DocumentListResponse(documents=documents, total=len(documents))
 
 

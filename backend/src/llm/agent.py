@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 async def query_with_agent(
-    question: str, max_rounds: int = 5, context_messages: list[dict] | None = None
+    question: str,
+    max_rounds: int = 5,
+    context_messages: list[dict] | None = None,
+    project_id: str | None = None,
 ) -> dict[str, Any]:
     """
     带工具调用的 Agent 查询
@@ -26,6 +29,9 @@ async def query_with_agent(
     Returns:
         {"answer": str, "citations": list[str], "rounds": int, "retrieved_chunks": list[dict]}
     """
+    from .tools import _current_project_id
+
+    _current_project_id.set(project_id)
     workflow = QueryWorkflow(timeout=180)
     result = await workflow.run(
         question=question, context_messages=context_messages or []

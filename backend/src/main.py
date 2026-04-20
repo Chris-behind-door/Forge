@@ -32,6 +32,7 @@ class QueryRequest(BaseModel):
     question: str
     top_k: int = Field(default=5, description="返回结果数量")
     session_id: str | None = None
+    project_id: str | None = None  # 按项目过滤，null 返回所有
 
 
 class Citation(BaseModel):
@@ -143,7 +144,9 @@ async def query(request: QueryRequest) -> QueryResponse:
 
     try:
         result = await query_with_agent(
-            request.question, context_messages=context_messages
+            request.question,
+            context_messages=context_messages,
+            project_id=request.project_id,
         )
     except ValueError as e:
         if request.session_id:
