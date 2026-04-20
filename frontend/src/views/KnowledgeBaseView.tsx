@@ -518,8 +518,8 @@ function KnowledgeBaseView() {
             renderItem={(doc) => (
               <List.Item
                 actions={[
-                  // 重新处理按钮（仅 ready 状态显示）
-                  doc.status === 'ready' && (
+                  // 重新处理按钮（ready 或 error 状态显示）
+                  (doc.status === 'ready' || doc.status === 'error') && (
                     <Button
                       key="reprocess"
                       type="text"

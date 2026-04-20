@@ -57,11 +57,13 @@ def _get_or_create_table(db: lancedb.DBConnection) -> lancedb.table.Table:
     """获取或创建表，必要时迁移 schema"""
     if CHUNKS_TABLE in db.table_names():
         table = db.open_table(CHUNKS_TABLE)
-        # Schema v3 migration: add project_id column
         schema = table.schema
         if "project_id" not in [f.name for f in schema]:
-            logger.info("Migrating schema v3: adding project_id column")
-            table.add_columns({"project_id": "null"})
+            logger.info("Migrating schema v3: recreating table with project_id column")
+            # Cannot add nullable column reliably via add_columns,
+            # so drop and recreate. Existing vectors need reprocessing anyway.
+            db.drop_table(CHUNKS_TABLE)
+            return db.create_table(CHUNKS_TABLE, schema=ChunkRecord)
         return table
     return db.create_table(CHUNKS_TABLE, schema=ChunkRecord)
 
