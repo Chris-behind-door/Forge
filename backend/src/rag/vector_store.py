@@ -59,8 +59,8 @@ def _get_or_create_table(db: lancedb.DBConnection) -> lancedb.table.Table:
         table = db.open_table(CHUNKS_TABLE)
         schema = table.schema
         pid_field = next((f for f in schema if f.name == "project_id"), None)
-        # Need rebuild if column missing or not nullable
-        needs_rebuild = pid_field is None or not pid_field.nullable
+        # Need rebuild if column missing, or type is not string (e.g. "null" type from bad migration)
+        needs_rebuild = pid_field is None or str(pid_field.type) != "utf8"
         if needs_rebuild:
             logger.info("Migrating schema v3: recreating table with project_id column")
             # Cannot add nullable column reliably via add_columns,
