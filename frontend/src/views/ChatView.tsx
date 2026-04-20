@@ -46,7 +46,7 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
   const [ipcToken, setIpcToken] = useState<string | null>(null)
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('__general__')
   const { projects } = useProjects()
 
   useEffect(() => {
@@ -131,7 +131,7 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
       }
 
       const body: { question: string; session_id: string; project_id?: string } = { question: input, session_id: sid }
-      if (selectedProjectId) body.project_id = selectedProjectId
+      if (selectedProjectId && selectedProjectId !== '__general__') body.project_id = selectedProjectId
 
       const response = await fetch(`${getApiBase()}/query`, {
         method: 'POST',
@@ -228,26 +228,38 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
       </div>
 
       <div className="input-area">
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+        <div style={{
+          border: '1px solid #d9d9d9',
+          borderRadius: 12,
+          overflow: 'hidden',
+          background: '#fff',
+        }}>
+          {/* 输入框区域 */}
           <TextArea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="输入问题... (Enter 发送, Shift+Enter 换行)"
-            autoSize={{ minRows: 2, maxRows: 4 }}
+            autoSize={{ minRows: 3, maxRows: 8 }}
             disabled={loading}
-            style={{ flex: 1 }}
+            bordered={false}
+            style={{ padding: '12px 16px 8px', resize: 'none' }}
           />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {/* 底部工具栏 */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '4px 12px 8px',
+          }}>
             <Select
               size="small"
-              value={selectedProjectId ?? undefined}
-              onChange={(v) => setSelectedProjectId(v === '__general__' ? null : v)}
+              value={selectedProjectId}
+              onChange={(v) => setSelectedProjectId(v)}
               style={{ minWidth: 120 }}
-              placeholder="通用知识"
               options={[
-                { value: '__general__', label: '通用知识' },
-                ...projects.map(p => ({ value: p.id, label: p.name })),
+                { value: '__general__', label: '📚 通用知识' },
+                ...projects.map(p => ({ value: p.id, label: `📁 ${p.name}` })),
               ]}
             />
             <Button
@@ -256,6 +268,7 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
               onClick={handleSend}
               loading={loading}
               disabled={!input.trim()}
+              size="small"
             >
               发送
             </Button>

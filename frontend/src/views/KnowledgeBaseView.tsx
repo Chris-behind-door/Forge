@@ -88,7 +88,7 @@ function KnowledgeBaseView() {
   const [uploading, setUploading] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [reprocessingAll, setReprocessingAll] = useState(false) // 重新处理全部
-  const [uploadProjectId, setUploadProjectId] = useState<string | null>(null)
+  const [uploadProjectId, setUploadProjectId] = useState<string>('__general__')
   const lastDropTimeRef = useRef<number>(0)
 
   // -------- 项目管理 --------
@@ -206,7 +206,7 @@ function KnowledgeBaseView() {
   const uploadFile = async (filePath: string): Promise<boolean> => {
     try {
       const body: Record<string, string | null> = { file_path: filePath }
-      if (uploadProjectId) body.project_id = uploadProjectId
+      if (uploadProjectId && uploadProjectId !== '__general__') body.project_id = uploadProjectId
       const res = await fetch(`${getApiBase()}/documents/upload`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -452,10 +452,10 @@ function KnowledgeBaseView() {
         <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
           <span>导入到：</span>
           <Select
-            value={uploadProjectId ?? undefined}
-            onChange={(v) => setUploadProjectId(v === '__general__' ? null : v)}
+            value={uploadProjectId}
+            onChange={(v) => setUploadProjectId(v)}
             style={{ minWidth: 160 }}
-            placeholder="选择项目"
+            placeholder="通用知识"
             options={[
               { value: '__general__', label: '通用知识' },
               ...projects.map(p => ({ value: p.id, label: p.name })),
