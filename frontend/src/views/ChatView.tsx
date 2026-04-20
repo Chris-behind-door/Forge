@@ -164,7 +164,7 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
     } finally {
       setLoading(false)
     }
-  }, [input, ipcToken, sessionId])
+  }, [input, ipcToken, sessionId, selectedProjectId, onNewChat])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {

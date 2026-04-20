@@ -206,9 +206,9 @@ function KnowledgeBaseView() {
   const uploadFile = async (filePath: string): Promise<boolean> => {
     try {
       const body: Record<string, string | null> = { file_path: filePath }
-      const pid = typeof uploadProjectId === 'string' ? uploadProjectId : (uploadProjectId as any)?.value
+      const pid = uploadProjectId
       if (pid && pid !== '__general__') body.project_id = pid
-      console.log('[DEBUG] uploadFile:', { uploadProjectId, pid, body })
+
       const res = await fetch(`${getApiBase()}/documents/upload`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -261,7 +261,7 @@ function KnowledgeBaseView() {
     if (successCount > 0) {
       message.info(`成功上传 ${successCount} 个文件`)
     }
-  }, [fetchDocuments])
+  }, [fetchDocuments, uploadProjectId])
 
   /** 通过 Tauri 对话框选择文件 */
   const handleSelectFiles = useCallback(async () => {
@@ -455,7 +455,7 @@ function KnowledgeBaseView() {
           <span>导入到：</span>
           <Select
             value={uploadProjectId}
-            onChange={(v) => setUploadProjectId(typeof v === 'string' ? v : (v as any)?.value ?? v)}
+            onChange={(v) => setUploadProjectId(v)}
             style={{ minWidth: 160 }}
             placeholder="通用知识"
             options={[
