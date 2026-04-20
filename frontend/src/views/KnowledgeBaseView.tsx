@@ -410,7 +410,7 @@ function KnowledgeBaseView() {
                       <Popconfirm
                         key="delete"
                         title="确认删除此项目？"
-                        description="项目下的文档将移至通用知识"
+                        description="项目下的文档将一并删除，无法恢复"
                         onConfirm={() => deleteProject(item.id)}
                         okText="删除"
                         cancelText="取消"

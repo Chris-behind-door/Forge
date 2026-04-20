@@ -251,6 +251,7 @@ async def resume_pending_documents() -> None:
 
 @router.post("/upload", response_model=Document)
 async def upload_document(request: DocumentUploadRequest) -> Document:
+    _log(f"Upload request: file={request.file_path}, project_id={request.project_id}")
     """
     通过本地文件路径上传文档
 
