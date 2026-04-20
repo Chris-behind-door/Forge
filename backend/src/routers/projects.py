@@ -129,7 +129,7 @@ async def delete_project(project_id: str) -> dict:
     if project_id not in projects:
         raise HTTPException(status_code=404, detail="项目不存在")
 
-    # Cascade: remove meetings and resolutions from JSON
+    # Cascade 1: remove meetings and resolutions from JSON
     meetings_data = _load_json(MEETINGS_FILE)
     resolutions_data = _load_json(RESOLUTIONS_FILE)
     meeting_ids = {mid for mid, m in meetings_data.items() if m.get("project_id") == project_id}
@@ -142,9 +142,24 @@ async def delete_project(project_id: str) -> dict:
     with open(RESOLUTIONS_FILE, "w", encoding="utf-8") as f:
         json.dump(resolutions_data, f, indent=2, ensure_ascii=False)
 
+    # Cascade 2: delete all documents in this project
+    from src.routers.documents import _load_metadata, _cancel_processing
+    from src.rag.vector_store import delete_doc_chunks
+    metadata = _load_metadata()
+    doc_ids_to_delete = [did for did, doc in metadata.items() if getattr(doc, 'project_id', None) == project_id]
+    for doc_id in doc_ids_to_delete:
+        doc = metadata[doc_id]
+        _cancel_processing(doc_id)
+        stored_path = Path(doc.stored_path)
+        if stored_path.exists():
+            stored_path.unlink()
+        delete_doc_chunks(doc_id)
+        del metadata[doc_id]
+    from src.routers.documents import _save_metadata
+    _save_metadata(metadata)
+
     del projects[project_id]
     _save_projects(projects)
 
     # Note: Kùzu doesn't easily cascade-delete; nodes stay until DB reset.
-    # For P0 this is acceptable.
-    return {"status": "deleted", "id": project_id}
+    return {"status": "deleted", "id": project_id, "documents_deleted": len(doc_ids_to_delete)}
