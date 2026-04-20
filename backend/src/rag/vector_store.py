@@ -12,12 +12,17 @@
 - 融合两者分数，提高检索准确性
 """
 
+import logging
 import re
 from typing import Any
 
 import lancedb
 from lancedb.pydantic import LanceModel, Vector
 from pydantic import Field
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 from ..utils.paths import VECTOR_DIR
 from .embeddings import EMBEDDING_DIM, embed_query, embed_texts
