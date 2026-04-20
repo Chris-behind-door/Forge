@@ -207,6 +207,7 @@ function KnowledgeBaseView() {
     try {
       const body: Record<string, string | null> = { file_path: filePath }
       if (uploadProjectId && uploadProjectId !== '__general__') body.project_id = uploadProjectId
+      console.log('[DEBUG] uploadFile:', { uploadProjectId, body })
       const res = await fetch(`${getApiBase()}/documents/upload`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
