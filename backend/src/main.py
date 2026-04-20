@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field
 from .routers.config import router as config_router
 from .routers.documents import router as documents_router, resume_pending_documents
 from .routers.sessions import router as sessions_router
+from .routers.projects import router as projects_router
+from .routers.meetings import router as meetings_router
 from .utils.llm_config import get_active_provider
 from .utils.paths import CURRENT_SCHEMA_VERSION, get_schema_version
 
@@ -67,6 +69,8 @@ app.add_middleware(
 app.include_router(documents_router)
 app.include_router(config_router)
 app.include_router(sessions_router)
+app.include_router(projects_router)
+app.include_router(meetings_router)
 
 
 @app.on_event("startup")

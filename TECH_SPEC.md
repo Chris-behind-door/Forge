@@ -1,7 +1,7 @@
 # 工程设计工作台 - 技术方案文档
 
-> 版本: 2.0
-> 日期: 2026-03-27
+> 版本: 3.0
+> 日期: 2026-04-20
 > 作者: 克里斯 + 小爪
 > 许可证: 开源（待定）
 
@@ -19,9 +19,10 @@
 ### 1.2 核心功能
 
 1. **技术资料 RAG** - 知识库检索 + 引用溯源
-2. **会议纪要 RAG** - 检索 + 关联关系追踪（"否定之否定"）
-3. **分流智能体** - 自动判断查询对象
-4. **BYOK** - 用户自带 API Key，支持多个 LLM 厂商
+2. **BYOK** - 用户自带 API Key，支持多个 LLM 厂商
+3. **会议纪要关联** - 图数据库追踪（计划中）
+
+> ~~分流智能体~~ 已取消，由主 Agent 自行判断查询对象
 
 ### 1.3 目标用户
 
@@ -88,14 +89,18 @@
 - Workflow 支持事件驱动、循环、分支
 - 有现成的 Citation Query Engine 示例
 
-**Workflow 架构:**
+**Workflow 架构（已实现）:**
 
 ```
 StartEvent
     ↓
-QueryRouted (分流智能体)
-    ├── 技术资料 → RetrieveTechDocs → GenerateWithCitation
-    └── 会议纪要 → RetrieveMeetingNotes → TraceRelations → GenerateWithCitation
+ToolCallStep (LLM + 工具调用循环，最多 3 轮)
+    ↓
+ExpandContextStep (检索 chunk 前后各 1 chunk 扩展上下文)
+    ↓
+GenerateStep (注入扩展上下文，生成带引用的回答)
+    ↓
+StopEvent
 ```
 
 ### 2.7 向量库: LanceDB
@@ -281,47 +286,36 @@ def delete_api_key(provider: str):
 - 返回检索到的原始文档片段（当前已实现的行为）
 - 前端提示用户配置 Key 以获得 AI 回答
 
-### 4.2 分流智能体 (Router Agent)
+### 4.2 分流智能体 ~~已取消~~
 
-**职责:** 判断用户查询应该走技术资料库还是会议纪要库
+原计划单独做一个 Router Agent 判断查询走技术资料还是会议纪要。
 
-```python
-from llama_index.core.workflow import Workflow, step, StartEvent, StopEvent, Event
+**取消原因：** 增加复杂度但价值有限，主 Agent 可自行判断。
 
-class QueryRouted(Event):
-    target: str  # "tech_docs" | "meeting_notes"
-    query: str
+**替代方案：** QueryWorkflow 的 tool_call_step 中 LLM 自行决定调用哪些工具。
 
-class RouterWorkflow(Workflow):
-    @step
-    async def route_query(self, ev: StartEvent) -> QueryRouted:
-        query = ev.query
-        
-        # 简单规则判断（后续可用 LLM 增强）
-        meeting_keywords = ["决议", "会议", "确定", "决定", "之前说的"]
-        if any(kw in query for kw in meeting_keywords):
-            return QueryRouted(target="meeting_notes", query=query)
-        else:
-            return QueryRouted(target="tech_docs", query=query)
-```
-
-### 4.3 RAG 检索 (Retriever) ✅ 已实现基础版
+### 4.3 RAG 检索 (Retriever) ✅ 已实现
 
 **已实现：**
 - fastembed bge-small-zh embedding（离线）
 - LanceDB 向量存储
 - 混合检索（向量语义 + 关键词匹配）
 - PDF 解析（直接提取 + OCR fallback + 并行）
-- CHM 解析（7z + HTML 文本提取）
+- CHM 解析（7z + HTML 文本提取，支持层级结构）
 - 文档元数据管理、去重、断点恢复
+- Chunk 上下文扩展（检索后前后各 1 chunk，去重后注入 LLM prompt）
 
-**待实现（LlamaIndex 升级）：**
-- 父子切片策略（HierarchicalNodeParser）
-- 检索时用子节点匹配，返回父节点上下文
+### 4.4 LLM 回答生成 ✅ 已实现
 
-### 4.4 LLM 回答生成 (待实现)
+通过 QueryWorkflow 的 GenerateStep 实现，prompt 位于 `src/llm/prompts.py`。
 
-**引用溯源 prompt：**
+**已实现：**
+- 带工具调用的 Agent 循环（最多 3 轮 tool call）
+- 扩展上下文注入（带截断保护，15000 字符上限）
+- 引用提取（`[来源:xxx]` 格式）
+- 会话历史上下文传递
+
+**引用溯源 prompt（参考）：**
 
 ```python
 CITATION_PROMPT = """
@@ -382,26 +376,17 @@ def trace_resolution(note_id: str) -> list:
 
 ## 5. 端口与进程管理
 
-### 5.1 端口动态分配
+### 5.1 端口动态分配 ✅ 已实现 (2026-04-19)
 
-Tauri 启动 Sidecar 时动态分配端口，通过约定文件传递：
+**Tauri 侧（Rust, `src-tauri/src/main.rs`）：**
+- `find_available_port(base_port=8765, max_tries=100)` 尝试绑定端口
+- 通过 IPC event `backend-port` 传递给前端
+- 同时通过 `--port` CLI 参数和环境变量 `FORGE_PORT` 传递给后端
 
-```python
-import socket
+**后端侧（Python, `run.py`）：**
+- 接收 `--port` 参数启动 FastAPI
 
-def find_available_port(start: int = 8765, max_tries: int = 100) -> int:
-    for port in range(start, start + max_tries):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(('', port))
-                return port
-        except OSError:
-            continue
-    raise RuntimeError("No available port found")
-
-# 启动时写入端口文件
-PORT_FILE = Path.home() / ".engineer_assistant" / ".port"
-```
+**前端：** 通过 Tauri IPC 监听 `backend-port` 事件获取端口
 
 ### 5.2 前后端通信
 
@@ -419,22 +404,27 @@ engineer_assistant/
 │   ├── src/
 │   │   ├── main.py            # FastAPI 入口
 │   │   ├── routers/
-│   │   │   ├── documents.py   # ✅ 文档管理
-│   │   │   ├── query.py       # 查询（待实现 LLM 生成）
-│   │   │   └── config.py      # LLM 配置（待实现）
+│   │   ├── llm/
+│   │   │   ├── workflow.py    # ✅ LlamaIndex Workflow
+│   │   │   ├── agent.py       # ✅ Agent 入口（委托 Workflow）
+│   │   │   ├── client.py      # ✅ LLM API 调用
+│   │   │   ├── prompts.py     # ✅ System prompt
+│   │   │   └── tools.py       # ✅ Agent 工具（检索等）
 │   │   ├── rag/
 │   │   │   ├── embeddings.py  # ✅ fastembed
-│   │   │   ├── vector_store.py # ✅ LanceDB
-│   │   │   ├── workflow.py    # LlamaIndex Workflow（待实现）
-│   │   │   ├── retriever.py   # 待实现
-│   │   │   └── citation.py    # 待实现
+│   │   │   └── vector_store.py # ✅ LanceDB
 │   │   ├── parsers/
 │   │   │   ├── pdf.py         # ✅ PyMuPDF + OCR
 │   │   │   └── chm.py         # ✅
+│   │   ├── models/
+│   │   │   └── session.py     # ✅ 会话持久化
+│   │   ├── routers/
+│   │   │   ├── documents.py   # ✅ 文档管理
+│   │   │   ├── sessions.py    # ✅ 会话管理
+│   │   │   └── config.py      # ✅ LLM 配置
 │   │   └── utils/
 │   │       ├── paths.py       # ✅
-│   │       ├── port.py        # 端口分配（待实现）
-│   │       └── keyring.py     # API Key 存储（待实现）
+n│   │       └── llm_config.py  # ✅ LLM 配置管理 + keyring
 │   ├── pyproject.toml
 │   └── build.spec             # PyInstaller 配置
 │
@@ -523,18 +513,19 @@ cargo tauri build
 - [x] ~~分流智能体~~ → 由主 Agent 自行判断查哪边，不单独分（已取消）
 - [x] keyring 安全存储 API Key
 
-### Phase 3: 进阶功能（计划: 下周末启动图数据库）
+### Phase 3: 进阶功能（待启动）
 
 - [ ] 图数据库集成（Kùzu 或 SQLite+邻接表，待评估）
 - [ ] 会议纪要关联查询
 - [ ] Docling 高级文档解析（表格、公式、DOCX/PPTX/HTML 多格式）
-- [ ] 端口动态分配 ← 当前任务
+- [x] 端口动态分配 ✅ (2026-04-19)
 - [ ] 性能优化
 
 ### Phase 4: 发布与文档
 
 - [ ] 跨平台打包测试（macOS/Windows/Linux）
-- [ ] GitHub Actions CI（Windows 已跑通）
+- [x] GitHub Actions CI（Windows 已跑通）
+- [x] 后端 PyInstaller 打包 ✅
 - [ ] 用户文档
 - [ ] 开源发布
 
@@ -555,7 +546,6 @@ dependencies = [
     "llama-index>=0.10.0",
     "llama-index-workflows>=0.1.0",
     "lancedb>=0.8.0",
-    "kuzu>=0.3.0",
     "pymupdf>=1.24.0",
     "rapidocr-onnxruntime>=1.3.0",
     "langchain-text-splitters>=0.3.0",
@@ -576,10 +566,13 @@ build-backend = "hatchling.build"
 ```json
 {
   "dependencies": {
-    "react": "^18.2.0",
-    "antd": "^5.12.0",
-    "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/plugin-shell": "^2.0.0"
+    "react": "^19.2.4",
+    "antd": "^6.3.3",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-shell": "^2.3.5",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-fs": "^2.4.5",
+    "react-markdown": "^10.1.0"
   },
   "devDependencies": {
     "vite": "^5.0.0",
