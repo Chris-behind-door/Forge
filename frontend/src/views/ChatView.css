@@ -105,15 +105,8 @@
 
 /* 输入区域 - 固定底部 */
 .input-area {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
   background: white;
   padding: 12px 16px;
   border-top: 1px solid #f0f0f0;
-  flex-shrink: 0; /* 防止被压缩 */
-}
-
-.input-area .ant-input {
-  flex: 1;
+  flex-shrink: 0;
 }

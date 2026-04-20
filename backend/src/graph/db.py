@@ -90,7 +90,15 @@ def _ensure_db() -> None:
     global _db, _conn
     if _db is None:
         KUZU_DIR.mkdir(parents=True, exist_ok=True)
-        _db = kuzu.Database(str(KUZU_PATH))
+        try:
+            _db = kuzu.Database(str(KUZU_PATH))
+        except RuntimeError as e:
+            if "lock" in str(e).lower():
+                logger.error("Kùzu database is locked by another process: %s", e)
+                raise RuntimeError(
+                    "数据库被其他进程占用，请关闭其他实例后重试"
+                ) from e
+            raise
         _conn = kuzu.Connection(_db)
         _init_schema(_conn)
         logger.info("Kùzu database initialized")
