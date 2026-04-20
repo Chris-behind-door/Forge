@@ -8,7 +8,7 @@ import asyncio
 import logging
 from typing import Any
 
-from .db import get_conn
+from .db import get_conn, get_lock
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,8 @@ def _exec_sync(cypher: str, params: dict[str, Any] | None = None) -> list[dict[s
 
 
 async def exec_query(cypher: str, params: dict[str, Any] | None = None) -> list[Any]:
-    return await asyncio.to_thread(_exec_sync, cypher, params)
+    async with get_lock():
+        return await asyncio.to_thread(_exec_sync, cypher, params)
 
 
 # ---- Resolution CRUD ----

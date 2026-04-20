@@ -1,5 +1,9 @@
 """
 Kùzu graph database connection management and schema initialization.
+
+Kùzu requires a single Database instance (file-locked) and supports
+one concurrent writer. We keep a global singleton + asyncio.Lock for
+all write operations.
 """
 
 import asyncio
@@ -10,9 +14,11 @@ import kuzu
 
 logger = logging.getLogger(__name__)
 
-KUZU_DIR = Path.home() / ".engineer_assistant" / "data" / "kuzu"
+KUZU_DIR = Path.home() / ".engineer_assistant" / "data"
+KUZU_PATH = KUZU_DIR / "kuzu.db"
 
 _db: kuzu.Database | None = None
+_conn: kuzu.Connection | None = None
 _lock = asyncio.Lock()
 
 SCHEMAS = [
@@ -79,23 +85,22 @@ def _init_schema(conn: kuzu.Connection) -> None:
             pass  # table already exists
 
 
-def get_db() -> kuzu.Database:
-    global _db
+def _ensure_db() -> None:
+    """Initialize the singleton Database and Connection (idempotent)."""
+    global _db, _conn
     if _db is None:
         KUZU_DIR.mkdir(parents=True, exist_ok=True)
-        _db = kuzu.Database(str(KUZU_DIR))
-        conn = kuzu.Connection(_db)
-        _init_schema(conn)
+        _db = kuzu.Database(str(KUZU_PATH))
+        _conn = kuzu.Connection(_db)
+        _init_schema(_conn)
         logger.info("Kùzu database initialized")
-    return _db
 
 
 def get_conn() -> kuzu.Connection:
-    return kuzu.Connection(get_db())
+    """Synchronous: return the singleton Connection."""
+    _ensure_db()
+    return _conn  # type: ignore[return-value]
 
 
-async def get_conn_async() -> kuzu.Connection:
-    """Get a connection (schema init is idempotent)."""
-    async with _lock:
-        db = await asyncio.to_thread(get_db)
-    return kuzu.Connection(db)
+def get_lock() -> asyncio.Lock:
+    return _lock

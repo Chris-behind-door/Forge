@@ -70,8 +70,8 @@ async def create_project(req: ProjectCreate) -> Project:
     # Create node in Kùzu
     from ..graph.queries import exec_query
     await exec_query(
-        "CREATE (p:Project {id: $id, name: $name, description: $desc, created_at: $cat})",
-        {"id": project.id, "name": project.name, "desc": project.description,
+        "CREATE (p:Project {id: $id, name: $name, description: $pdesc, created_at: $cat})",
+        {"id": project.id, "name": project.name, "pdesc": project.description,
          "cat": project.created_at},
     )
     return project
@@ -117,8 +117,8 @@ async def update_project(project_id: str, req: ProjectUpdate) -> Project:
 
     from ..graph.queries import exec_query
     await exec_query(
-        "MATCH (p:Project) WHERE p.id = $id SET p.name = $name, p.description = $desc",
-        {"id": project_id, "name": proj.name, "desc": proj.description},
+        "MATCH (p:Project) WHERE p.id = $id SET p.name = $name, p.description = $pdesc",
+        {"id": project_id, "name": proj.name, "pdesc": proj.description},
     )
     return proj
 
