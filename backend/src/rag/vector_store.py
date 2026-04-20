@@ -58,7 +58,10 @@ def _get_or_create_table(db: lancedb.DBConnection) -> lancedb.table.Table:
     if CHUNKS_TABLE in db.table_names():
         table = db.open_table(CHUNKS_TABLE)
         schema = table.schema
-        if "project_id" not in [f.name for f in schema]:
+        pid_field = next((f for f in schema if f.name == "project_id"), None)
+        # Need rebuild if column missing or not nullable
+        needs_rebuild = pid_field is None or not pid_field.nullable
+        if needs_rebuild:
             logger.info("Migrating schema v3: recreating table with project_id column")
             # Cannot add nullable column reliably via add_columns,
             # so drop and recreate. Existing vectors need reprocessing anyway.
