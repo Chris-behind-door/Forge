@@ -206,16 +206,27 @@ function MeetingsView() {
     const inCurrentMeeting = resolutions.some(r => r.id === resId)
     if (!inCurrentMeeting) {
       // Find which meeting this resolution belongs to
-      // Search across all meetings in current project
       for (const mtg of meetings) {
         try {
           const res = await fetch(`${getApiBase()}/meetings/${mtg.id}/resolutions`)
           if (res.ok) {
             const mtgResolutions: Resolution[] = await res.json()
             if (mtgResolutions.some(r => r.id === resId)) {
-              // Switch to this meeting first
+              // Switch to this meeting
               setSelectedMeeting(mtg)
               setResolutions(mtgResolutions)
+              // Fetch relation chains for the new meeting's resolutions
+              const chains: Record<string, RelationItem[]> = {}
+              for (const r of mtgResolutions) {
+                try {
+                  const cr = await fetch(`${getApiBase()}/resolutions/${r.id}/chain`)
+                  if (cr.ok) {
+                    const chainData = await cr.json()
+                    chains[r.id] = chainData.chain || []
+                  }
+                } catch { /* ignore */ }
+              }
+              setRelationMap(chains)
               break
             }
           }
@@ -353,21 +364,6 @@ function MeetingsView() {
                       <div className="resolution-header">
                         <span className="resolution-index">决议 {res.index}</span>
                         <Tag color={st.color}>{st.emoji} {st.label}</Tag>
-                        {/* 已替代：快速跳转到替代决议 */}
-                        {res.status === 'superseded' && chains.some(c => c.from_id !== res.id && c.relation_type === 'SUPERSEDES') && (
-                          <Tooltip title="点击跳转到替代决议">
-                            <Button
-                              type="link"
-                              size="small"
-                              onClick={() => {
-                                const superRel = chains.find(c => c.from_id !== res.id && c.relation_type === 'SUPERSEDES')
-                                if (superRel) handleJumpToResolution(superRel.from_id)
-                              }}
-                            >
-                              查看替代决议 →
-                            </Button>
-                          </Tooltip>
-                        )}
                       </div>
                       <p className="resolution-content">{res.content}</p>
 
