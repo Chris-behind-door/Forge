@@ -117,26 +117,30 @@ async def get_resolution_chain(res_id: str) -> list[dict[str, Any]]:
     """Get all resolutions connected to this one via SUPERSEDES/AMENDS/SUPPLEMENTS."""
     chain = []
     for rel_type in ("SUPERSEDES", "AMENDS", "SUPPLEMENTS"):
-        # Outgoing
+        # Outgoing: this resolution -> other
         rows = await exec_query(
             f"MATCH (a:Resolution)-[e:{rel_type}]->(b:Resolution) "
             "WHERE a.id = $id RETURN b.id, b.content, b.meeting_id, b.status, e",
             {"id": res_id},
         )
         for row in rows:
-            chain.append({"resolution_id": row[0], "content": row[1],
-                          "meeting_id": row[2], "status": row[3],
-                          "relation": rel_type, "direction": "outgoing"})
-        # Incoming
+            chain.append({
+                "from_id": res_id, "to_id": row[0],
+                "relation_type": rel_type, "direction": "outgoing",
+                "to_content": row[1], "to_meeting_id": row[2], "to_status": row[3],
+            })
+        # Incoming: other -> this resolution
         rows = await exec_query(
             f"MATCH (a:Resolution)-[e:{rel_type}]->(b:Resolution) "
             "WHERE b.id = $id RETURN a.id, a.content, a.meeting_id, a.status, e",
             {"id": res_id},
         )
         for row in rows:
-            chain.append({"resolution_id": row[0], "content": row[1],
-                          "meeting_id": row[2], "status": row[3],
-                          "relation": rel_type, "direction": "incoming"})
+            chain.append({
+                "from_id": row[0], "to_id": res_id,
+                "relation_type": rel_type, "direction": "incoming",
+                "from_content": row[1], "from_meeting_id": row[2], "from_status": row[3],
+            })
     return chain
 
 

@@ -47,14 +47,11 @@ interface RelationItem {
   from_id: string
   to_id: string
   relation_type: string
-  reason: string
-  change_summary: string
-  supplement_content: string
-  meeting_id: string
+  direction: 'incoming' | 'outgoing'
   from_content?: string
+  from_meeting_id?: string
   to_content?: string
-  from_title?: string
-  to_title?: string
+  to_meeting_id?: string
 }
 
 // ============ 样式配置 ============
