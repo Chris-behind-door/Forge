@@ -1,0 +1,226 @@
+/**
+ * MeetingsView - Styles
+ */
+
+.meetings-view {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ---- 左侧面板 ---- */
+
+.meetings-sidebar {
+  width: 280px;
+  min-width: 280px;
+  border-right: 1px solid #f0f0f0;
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: #fafafa;
+}
+
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 500;
+  color: #333;
+}
+
+.meeting-timeline {
+  padding-left: 8px;
+}
+
+.meeting-timeline .ant-timeline-item-content {
+  min-height: auto;
+}
+
+.timeline-item {
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+
+.timeline-item:hover {
+  background: #e6f4ff;
+}
+
+.timeline-item.active {
+  background: #e6f4ff;
+  border: 1px solid #91caff;
+}
+
+.timeline-item-date {
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 2px;
+}
+
+.timeline-item-title {
+  font-size: 14px;
+  color: #333;
+  font-weight: 500;
+}
+
+/* ---- 右侧详情 ---- */
+
+.meetings-detail {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 24px;
+}
+
+.detail-empty {
+  margin-top: 120px;
+}
+
+/* 会议标题卡 */
+.meeting-header-card {
+  margin-bottom: 16px;
+}
+
+.meeting-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.meeting-title {
+  margin: 0 0 8px;
+  font-size: 18px;
+  color: #1a1a1a;
+}
+
+.meeting-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* 决议区 */
+.section-title {
+  margin: 0 0 12px;
+  font-size: 15px;
+  color: #333;
+}
+
+.resolutions-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 决议卡片 */
+.resolution-card {
+  border-left: 4px solid #d9d9d9;
+  transition: box-shadow 0.3s;
+}
+
+.resolution-card-active {
+  border-left-color: #52c41a;
+}
+
+.resolution-card-amended {
+  border-left-color: #faad14;
+}
+
+.resolution-card-superseded {
+  border-left-color: #ff4d4f;
+}
+
+.resolution-highlight {
+  box-shadow: 0 0 0 3px #1890ff40;
+  animation: highlight-pulse 0.5s ease-out;
+}
+
+@keyframes highlight-pulse {
+  0% { box-shadow: 0 0 0 6px #1890ff60; }
+  100% { box-shadow: 0 0 0 3px #1890ff40; }
+}
+
+.resolution-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.resolution-index {
+  font-weight: 600;
+  color: #333;
+  font-size: 14px;
+}
+
+.resolution-content {
+  margin: 0;
+  color: #444;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+/* 关联链 */
+.resolution-relations {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #e8e8e8;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.relation-item {
+  font-size: 12px;
+  color: #666;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.2s;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.relation-item:hover {
+  background: #f0f0f0;
+}
+
+.relation-icon {
+  color: #1890ff;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.relation-summary {
+  color: #888;
+  margin-left: 4px;
+}
+
+/* 原始纪要 */
+.raw-text-collapse {
+  margin-top: 16px;
+}
+
+.raw-text-content {
+  font-size: 13px;
+  line-height: 1.8;
+  color: #555;
+  background: #fafafa;
+  padding: 16px;
+  border-radius: 6px;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
+}

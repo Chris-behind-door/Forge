@@ -7,16 +7,17 @@ import { useState, useEffect, useCallback } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { setBackendPort, getApiBase } from './api'
 import { Layout, Menu, Button } from 'antd'
-import { MessageOutlined, BookOutlined, SettingOutlined, PlusOutlined, DeleteOutlined, QuestionCircleOutlined } from '@ant-design/icons'
+import { MessageOutlined, BookOutlined, CalendarOutlined, SettingOutlined, PlusOutlined, DeleteOutlined, QuestionCircleOutlined } from '@ant-design/icons'
 import { open } from '@tauri-apps/plugin-shell'
 import ChatView from './views/ChatView'
 import KnowledgeBaseView from './views/KnowledgeBaseView'
 import ConfigView from './views/ConfigView'
+import MeetingsView from './views/MeetingsView'
 import './App.css'
 
 const { Sider, Content } = Layout
 
-type ViewType = 'chat' | 'knowledge' | 'config'
+type ViewType = 'chat' | 'knowledge' | 'meetings' | 'config'
 
 const menuItems = [
   {
@@ -28,6 +29,11 @@ const menuItems = [
     key: 'knowledge',
     icon: <BookOutlined />,
     label: '知识库',
+  },
+  {
+    key: 'meetings',
+    icon: <CalendarOutlined />,
+    label: '会议纪要',
   },
   {
     key: 'config',
@@ -181,6 +187,7 @@ function App() {
         <Content className="main-content">
           {currentView === 'chat' && <ChatView sessionId={sessionId} onNewChat={handleNewChat} />}
           {currentView === 'knowledge' && <KnowledgeBaseView />}
+          {currentView === 'meetings' && <MeetingsView />}
           {currentView === 'config' && <ConfigView />}
         </Content>
       </Layout>
