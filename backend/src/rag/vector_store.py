@@ -20,8 +20,6 @@ import lancedb
 from lancedb.pydantic import LanceModel, Vector
 from pydantic import Field
 
-import logging
-
 logger = logging.getLogger(__name__)
 
 from ..utils.paths import VECTOR_DIR

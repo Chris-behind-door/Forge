@@ -143,8 +143,8 @@ async def delete_project(project_id: str) -> dict:
         json.dump(resolutions_data, f, indent=2, ensure_ascii=False)
 
     # Cascade 2: delete all documents in this project
-    from src.routers.documents import _load_metadata, _cancel_processing
-    from src.rag.vector_store import delete_doc_chunks
+    from ..routers.documents import _load_metadata, _cancel_processing, _save_metadata
+    from ..rag.vector_store import delete_doc_chunks
     metadata = _load_metadata()
     doc_ids_to_delete = [did for did, doc in metadata.items() if getattr(doc, 'project_id', None) == project_id]
     for doc_id in doc_ids_to_delete:
@@ -155,7 +155,6 @@ async def delete_project(project_id: str) -> dict:
             stored_path.unlink()
         delete_doc_chunks(doc_id)
         del metadata[doc_id]
-    from src.routers.documents import _save_metadata
     _save_metadata(metadata)
 
     del projects[project_id]

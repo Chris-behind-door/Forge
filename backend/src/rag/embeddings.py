@@ -24,7 +24,6 @@ CACHE_DIR = VECTOR_DIR / "cache"
 
 # Thread lock to prevent concurrent model downloads
 _model_lock = threading.Lock()
-_model_ready = threading.Event()
 _embedding_model: TextEmbedding | None = None
 _model_error: Exception | None = None
 
@@ -60,11 +59,9 @@ def _download_model() -> TextEmbedding:
             list(model.embed(["test"]))
             logger.info("嵌入模型加载完成")
             _embedding_model = model
-            _model_ready.set()
             return _embedding_model
         except Exception as e:
             _model_error = e
-            _model_ready.set()
             logger.error("嵌入模型加载失败: %s", e)
             raise
 

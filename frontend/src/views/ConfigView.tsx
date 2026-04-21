@@ -48,11 +48,7 @@ function ConfigView() {
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ status: string; detail?: string } | null>(null)
   const [customProfiles, setCustomProfiles] = useState<CustomProfile[]>(() => loadJson(CUSTOM_PROFILES_KEY, []))
-  const [providerModels, setProviderModels] = useState<Record<string, string>>(() => {
-    // 清除旧版本的数据（格式可能不兼容）
-    try { localStorage.removeItem('llm_provider_models') } catch {}
-    return {}
-  })
+  const [providerModels, setProviderModels] = useState<Record<string, string>>(() => loadJson(PROVIDER_MODELS_KEY, {}))
 
   const [preset, setPreset] = useState<string>('')
   const [baseUrl, setBaseUrl] = useState('')

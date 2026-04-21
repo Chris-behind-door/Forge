@@ -77,12 +77,6 @@ class DocumentListResponse(BaseModel):
 _processing_tasks: dict[str, asyncio.Task] = {}
 
 
-def _log(msg: str) -> None:
-    """打印带时间戳的日志"""
-    timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-    logger.info(f"[{timestamp}] {msg}")
-
-
 # ============ 元数据管理 ============
 
 
@@ -132,12 +126,12 @@ async def process_document(
         file_type: 文件类型 (pdf, chm)
     """
     start_time = datetime.now()
-    _log(f"[{doc_id[:8]}] 开始处理文档 (类型: {file_type})")
+    logger.info(f"[{doc_id[:8]}] 开始处理文档 (类型: {file_type})")
 
     metadata = _load_metadata()
 
     if doc_id not in metadata:
-        _log(f"[{doc_id[:8]}] 文档不存在于元数据中，跳过")
+        logger.info(f"[{doc_id[:8]}] 文档不存在于元数据中，跳过")
         return
 
     doc = metadata[doc_id]
@@ -146,17 +140,17 @@ async def process_document(
         # 更新状态为处理中
         doc.status = "processing"
         _save_metadata(metadata)
-        _log(f"[{doc_id[:8]}] 状态更新: processing")
+        logger.info(f"[{doc_id[:8]}] 状态更新: processing")
 
         # 步骤 1: 解析文档（根据类型选择解析器）
         step_start = datetime.now()
 
         # 选择解析器
         if file_type == "chm":
-            _log(f"[{doc_id[:8]}] 开始 CHM 解析...")
+            logger.info(f"[{doc_id[:8]}] 开始 CHM 解析...")
             parser_func = parse_chm
         else:
-            _log(f"[{doc_id[:8]}] 开始 PDF 解析...")
+            logger.info(f"[{doc_id[:8]}] 开始 PDF 解析...")
             parser_func = parse_pdf
 
         # 在线程池中运行同步的解析函数
@@ -164,16 +158,16 @@ async def process_document(
         chunks = await loop.run_in_executor(None, parser_func, stored_path)
 
         elapsed = (datetime.now() - step_start).total_seconds()
-        _log(f"[{doc_id[:8]}] 解析完成: {len(chunks)} 个分块, 耗时 {elapsed:.2f}s")
+        logger.info(f"[{doc_id[:8]}] 解析完成: {len(chunks)} 个分块, 耗时 {elapsed:.2f}s")
 
         # 步骤 2: 向量化存储
         step_start = datetime.now()
-        _log(f"[{doc_id[:8]}] 开始向量化...")
+        logger.info(f"[{doc_id[:8]}] 开始向量化...")
 
         chunk_count = await loop.run_in_executor(None, add_chunks, doc_id, chunks, doc.project_id)
 
         elapsed = (datetime.now() - step_start).total_seconds()
-        _log(f"[{doc_id[:8]}] 向量化完成: {chunk_count} 个向量, 耗时 {elapsed:.2f}s")
+        logger.info(f"[{doc_id[:8]}] 向量化完成: {chunk_count} 个向量, 耗时 {elapsed:.2f}s")
 
         # 更新元数据
         metadata = _load_metadata()  # 重新加载（可能有并发更新）
@@ -183,10 +177,10 @@ async def process_document(
             _save_metadata(metadata)
 
         total_elapsed = (datetime.now() - start_time).total_seconds()
-        _log(f"[{doc_id[:8]}] 处理完成, 总耗时 {total_elapsed:.2f}s")
+        logger.info(f"[{doc_id[:8]}] 处理完成, 总耗时 {total_elapsed:.2f}s")
 
     except asyncio.CancelledError:
-        _log(f"[{doc_id[:8]}] 任务被取消，清理状态")
+        logger.info(f"[{doc_id[:8]}] 任务被取消，清理状态")
         metadata = _load_metadata()
         if doc_id in metadata:
             metadata[doc_id].status = "pending"  # 重置为待处理，方便恢复
@@ -194,7 +188,7 @@ async def process_document(
         raise
 
     except Exception as e:
-        _log(f"[{doc_id[:8]}] 处理失败: {e}")
+        logger.info(f"[{doc_id[:8]}] 处理失败: {e}")
         metadata = _load_metadata()
         if doc_id in metadata:
             metadata[doc_id].status = "error"
@@ -221,7 +215,7 @@ def _cancel_processing(doc_id: str) -> bool:
         task = _processing_tasks[doc_id]
         if not task.done():
             task.cancel()
-            _log(f"[{doc_id[:8]}] 已发送取消信号")
+            logger.info(f"[{doc_id[:8]}] 已发送取消信号")
             return True
     return False
 
@@ -238,7 +232,7 @@ async def resume_pending_documents() -> None:
         if doc.status in ("pending", "processing"):
             stored_path = Path(doc.stored_path)
             if stored_path.exists():
-                _log(f"[{doc_id[:8]}] 恢复处理: {doc.name} (状态: {doc.status})")
+                logger.info(f"[{doc_id[:8]}] 恢复处理: {doc.name} (状态: {doc.status})")
                 # 重置为 pending，防止 processing 卡住
                 if doc.status == "processing":
                     metadata[doc_id].status = "pending"
@@ -251,7 +245,6 @@ async def resume_pending_documents() -> None:
 
 @router.post("/upload", response_model=Document)
 async def upload_document(request: DocumentUploadRequest) -> Document:
-    _log(f"Upload request: file={request.file_path}, project_id={request.project_id}")
     """
     通过本地文件路径上传文档
 
@@ -298,7 +291,7 @@ async def upload_document(request: DocumentUploadRequest) -> Document:
     # 复制文件
     file_size = source_path.stat().st_size
     shutil.copy2(source_path, stored_path)
-    _log(f"[{doc_id[:8]}] 文件已复制: {source_path.name}")
+    logger.info(f"[{doc_id[:8]}] 文件已复制: {source_path.name}")
 
     # 创建文档记录
     document = Document(
@@ -357,11 +350,11 @@ async def delete_document(doc_id: str) -> dict:
     stored_path = Path(doc.stored_path)
     if stored_path.exists():
         stored_path.unlink()
-        _log(f"[{doc_id[:8]}] 文件已删除")
+        logger.info(f"[{doc_id[:8]}] 文件已删除")
 
     # 删除向量存储
     delete_doc_chunks(doc_id)
-    _log(f"[{doc_id[:8]}] 向量数据已删除")
+    logger.info(f"[{doc_id[:8]}] 向量数据已删除")
 
     # 从元数据中移除
     del metadata[doc_id]
@@ -396,7 +389,7 @@ async def reprocess_document(doc_id: str) -> dict:
 
     # 删除旧向量数据
     deleted = delete_doc_chunks(doc_id)
-    _log(f"[{doc_id[:8]}] 删除旧向量数据: {deleted} 条")
+    logger.info(f"[{doc_id[:8]}] 删除旧向量数据: {deleted} 条")
 
     # 重置状态
     metadata[doc_id].status = "pending"
@@ -405,7 +398,7 @@ async def reprocess_document(doc_id: str) -> dict:
 
     # 启动重新处理
     _start_processing(doc_id, str(stored_path), doc.file_type)
-    _log(f"[{doc_id[:8]}] 开始重新处理")
+    logger.info(f"[{doc_id[:8]}] 开始重新处理")
 
     return {"status": "reprocessing", "id": doc_id, "deleted_chunks": deleted}
 
