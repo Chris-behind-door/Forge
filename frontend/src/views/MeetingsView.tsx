@@ -189,7 +189,6 @@ function MeetingsView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           content: values.content,
-          index: values.index ?? resolutions.length + 1,
           status: 'active',
         }),
       })
@@ -205,16 +204,35 @@ function MeetingsView() {
 
   // -------- 跳转到关联决议 --------
 
-  const handleJumpToResolution = (resId: string) => {
+  const handleJumpToResolution = async (resId: string) => {
+    // Check if the resolution belongs to the current meeting
+    const inCurrentMeeting = resolutions.some(r => r.id === resId)
+    if (!inCurrentMeeting) {
+      // Find which meeting this resolution belongs to
+      // Search across all meetings in current project
+      for (const mtg of meetings) {
+        try {
+          const res = await fetch(`${getApiBase()}/meetings/${mtg.id}/resolutions`)
+          if (res.ok) {
+            const mtgResolutions: Resolution[] = await res.json()
+            if (mtgResolutions.some(r => r.id === resId)) {
+              // Switch to this meeting first
+              setSelectedMeeting(mtg)
+              setResolutions(mtgResolutions)
+              break
+            }
+          }
+        } catch { /* ignore */ }
+      }
+    }
     setHighlightedResId(resId)
-    // Scroll to element
     setTimeout(() => {
       const el = document.getElementById(`resolution-${resId}`)
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' })
         setTimeout(() => setHighlightedResId(null), 2000)
       }
-    }, 100)
+    }, 300)
   }
 
   // -------- 渲染 --------
@@ -308,7 +326,7 @@ function MeetingsView() {
                   icon={<PlusOutlined />}
                   onClick={() => {
                     resolutionForm.resetFields()
-                    resolutionForm.setFieldsValue({ index: resolutions.length + 1 })
+                    resolutionForm.resetFields()
                     setNewResolutionOpen(true)
                   }}
                 >
@@ -338,6 +356,21 @@ function MeetingsView() {
                       <div className="resolution-header">
                         <span className="resolution-index">决议 {res.index}</span>
                         <Tag color={st.color}>{st.emoji} {st.label}</Tag>
+                        {/* 已替代：快速跳转到替代决议 */}
+                        {res.status === 'superseded' && chains.some(c => c.from_id !== res.id && c.relation_type === 'SUPERSEDES') && (
+                          <Tooltip title="点击跳转到替代决议">
+                            <Button
+                              type="link"
+                              size="small"
+                              onClick={() => {
+                                const superRel = chains.find(c => c.from_id !== res.id && c.relation_type === 'SUPERSEDES')
+                                if (superRel) handleJumpToResolution(superRel.from_id)
+                              }}
+                            >
+                              查看替代决议 →
+                            </Button>
+                          </Tooltip>
+                        )}
                       </div>
                       <p className="resolution-content">{res.content}</p>
 
@@ -425,9 +458,6 @@ function MeetingsView() {
         cancelText="取消"
       >
         <Form form={resolutionForm} layout="vertical">
-          <Form.Item name="index" label="决议序号" rules={[{ required: true }]}>
-            <Input type="number" placeholder="自动递增" />
-          </Form.Item>
           <Form.Item name="content" label="决议内容" rules={[{ required: true, message: '请输入决议内容' }]}>
             <Input.TextArea rows={4} placeholder="输入决议内容" />
           </Form.Item>

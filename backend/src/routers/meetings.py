@@ -162,10 +162,14 @@ async def create_resolution(meeting_id: str, req: ResolutionCreate) -> Resolutio
 
     res_id = f"res_{uuid4().hex[:8]}"
     now = datetime.now().isoformat()
+    # Auto-calculate index if not provided or invalid
+    resolutions = _load_resolutions()
+    existing = [r for r in resolutions.values() if r.get("meeting_id") == meeting_id]
+    next_index = max((r.get("index", 0) for r in existing), default=0) + 1
     resolution = Resolution(
         id=res_id, meeting_id=meeting_id, project_id=project_id,
-        content=req.content, index=req.index, status=req.status,
-        source_doc_id=req.source_doc_id, created_at=now,
+        content=req.content, index=req.index if req.index and req.index > 0 else next_index,
+        status=req.status, source_doc_id=req.source_doc_id, created_at=now,
     )
     resolutions = _load_resolutions()
     resolutions[res_id] = resolution.model_dump()
