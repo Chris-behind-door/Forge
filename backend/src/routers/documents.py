@@ -317,11 +317,21 @@ async def upload_document(request: DocumentUploadRequest) -> Document:
 
 
 @router.get("", response_model=DocumentListResponse)
-async def list_documents(project_id: str | None = Query(default=None)) -> DocumentListResponse:
-    """列出已上传的文档，可按 project_id 筛选"""
+async def list_documents(
+    project_id: str | None = Query(default=None),
+    filter_null: bool = Query(default=False),
+) -> DocumentListResponse:
+    """列出已上传的文档，可按 project_id 筛选
+
+    - project_id=xxx: 返回该项目的文档
+    - filter_null=true: 只返回通用知识（project_id 为 null）
+    - 都不传: 返回全部文档
+    """
     metadata = _load_metadata()
     if project_id is not None:
         documents = [d for d in metadata.values() if d.project_id == project_id]
+    elif filter_null:
+        documents = [d for d in metadata.values() if d.project_id is None]
     else:
         documents = list(metadata.values())
     return DocumentListResponse(documents=documents, total=len(documents))

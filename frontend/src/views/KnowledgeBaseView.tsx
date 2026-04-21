@@ -170,7 +170,11 @@ function KnowledgeBaseView() {
 
     try {
       const params = new URLSearchParams()
-      if (selectedProjectId !== null) params.set('project_id', selectedProjectId)
+      if (selectedProjectId !== null) {
+        params.set('project_id', selectedProjectId)
+      } else {
+        params.set('filter_null', 'true')
+      }
       const query = params.toString() ? `?${params.toString()}` : ''
       const res = await fetch(`${getApiBase()}/documents${query}`)
       if (!res.ok) throw new Error('获取文档列表失败')
