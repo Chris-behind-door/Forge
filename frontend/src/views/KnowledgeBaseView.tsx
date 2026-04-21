@@ -11,7 +11,7 @@
  * - 轮询时静默更新，避免 UI 闪烁
  */
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Button, Card, List, Tag, message, Popconfirm, Empty, Select, Modal, Input, Form } from 'antd'
+import { Button, Card, List, Tag, message, Popconfirm, Empty, Modal, Input, Form, Dropdown } from 'antd'
 import {
   UploadOutlined,
   FilePdfOutlined,
@@ -23,6 +23,7 @@ import {
   PlusOutlined,
   EditOutlined,
   FolderOutlined,
+  SwapOutlined,
 } from '@ant-design/icons'
 import './KnowledgeBaseView.css'
 import { useProjects } from '../hooks/useProjects'
@@ -41,6 +42,7 @@ interface Document {
   uploaded_at: string
   status: 'pending' | 'processing' | 'ready' | 'error'
   chunk_count: number | null
+  project_id: string | null
 }
 
 /** Tauri 拖拽事件载荷 */
@@ -88,7 +90,7 @@ function KnowledgeBaseView() {
   const [uploading, setUploading] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [reprocessingAll, setReprocessingAll] = useState(false) // 重新处理全部
-  const [uploadProjectId, setUploadProjectId] = useState<string>('__general__')
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null) // null = 通用知识
   const lastDropTimeRef = useRef<number>(0)
 
   // -------- 项目管理 --------
@@ -119,6 +121,13 @@ function KnowledgeBaseView() {
       }
       setProjectModalOpen(false)
     } catch { /* validation failed */ }
+  }
+
+  const handleDeleteProject = async (projectId: string) => {
+    await deleteProject(projectId)
+    if (selectedProjectId === projectId) {
+      setSelectedProjectId(null)
+    }
   }
 
   // -------- 数据获取 --------
@@ -160,7 +169,10 @@ function KnowledgeBaseView() {
     }
 
     try {
-      const res = await fetch(`${getApiBase()}/documents`)
+      const params = new URLSearchParams()
+      if (selectedProjectId !== null) params.set('project_id', selectedProjectId)
+      const query = params.toString() ? `?${params.toString()}` : ''
+      const res = await fetch(`${getApiBase()}/documents${query}`)
       if (!res.ok) throw new Error('获取文档列表失败')
       const data = await res.json()
       setDocuments(data.documents)
@@ -172,7 +184,7 @@ function KnowledgeBaseView() {
         setInitialLoading(false)
       }
     }
-  }, [waitForBackend])
+  }, [waitForBackend, selectedProjectId])
 
   // -------- 轮询逻辑 --------
 
@@ -205,10 +217,7 @@ function KnowledgeBaseView() {
   /** 上传单个文件到后端 */
   const uploadFile = async (filePath: string): Promise<boolean> => {
     try {
-      const body: Record<string, string | null> = { file_path: filePath }
-      const pid = uploadProjectId
-      if (pid && pid !== '__general__') body.project_id = pid
-
+      const body: Record<string, string | null> = { file_path: filePath, project_id: selectedProjectId }
       const res = await fetch(`${getApiBase()}/documents/upload`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -261,7 +270,7 @@ function KnowledgeBaseView() {
     if (successCount > 0) {
       message.info(`成功上传 ${successCount} 个文件`)
     }
-  }, [fetchDocuments, uploadProjectId])
+  }, [fetchDocuments, selectedProjectId])
 
   /** 通过 Tauri 对话框选择文件 */
   const handleSelectFiles = useCallback(async () => {
@@ -378,7 +387,35 @@ function KnowledgeBaseView() {
     }
   }
 
+  // -------- 移动文档 --------
+
+  const handleMoveDocument = async (docId: string, targetProjectId: string | null) => {
+    try {
+      const res = await fetch(`${getApiBase()}/documents/${docId}/move`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: targetProjectId }),
+      })
+      if (!res.ok) throw new Error('移动失败')
+      message.success('文档已移动')
+      await fetchDocuments(false)
+    } catch (err) {
+      message.error(`移动失败: ${err}`)
+    }
+  }
+
   // -------- 渲染 --------
+
+  /** 获取当前选中项目的名称 */
+  const selectedProjectName = selectedProjectId === null
+    ? '通用知识'
+    : projects.find(p => p.id === selectedProjectId)?.name || '未知项目'
+
+  /** 移动下拉菜单项 */
+  const moveMenuItems = [
+    { key: '__general__', label: '通用知识' },
+    ...projects.map(p => ({ key: p.id, label: p.name })),
+  ]
 
   return (
     <div className="knowledge-base-view">
@@ -389,7 +426,7 @@ function KnowledgeBaseView() {
         </p>
       </div>
 
-      {/* 项目管理 */}
+      {/* 项目选择器 */}
       <Card
         className="project-card"
         title={<><FolderOutlined /> 项目管理</>}
@@ -398,36 +435,46 @@ function KnowledgeBaseView() {
         <List
           size="small"
           dataSource={[
-            // "通用知识" 特殊项
             { id: '__general__', name: '通用知识', description: '未归属项目的文档', isSpecial: true as const },
             ...projects.map(p => ({ ...p, isSpecial: false as const })),
           ]}
-          renderItem={(item) => (
-            <List.Item
-              actions={
-                item.isSpecial
-                  ? undefined
-                  : [
-                      <Button key="edit" type="text" icon={<EditOutlined />} size="small" onClick={() => handleEditProject(item)} />,
-                      <Popconfirm
-                        key="delete"
-                        title="确认删除此项目？"
-                        description="项目下的文档将一并删除，无法恢复"
-                        onConfirm={() => deleteProject(item.id)}
-                        okText="删除"
-                        cancelText="取消"
-                      >
-                        <Button type="text" danger icon={<DeleteOutlined />} size="small" />
-                      </Popconfirm>,
-                    ]
-              }
-            >
-              <List.Item.Meta
-                title={item.isSpecial ? <><Tag color="blue">默认</Tag>{item.name}</> : item.name}
-                description={item.description}
-              />
-            </List.Item>
-          )}
+          renderItem={(item) => {
+            const pid = item.isSpecial ? null : item.id
+            const isSelected = pid === selectedProjectId
+            return (
+              <List.Item
+                style={{
+                  background: isSelected ? '#e6f4ff' : undefined,
+                  border: isSelected ? '1px solid #91caff' : undefined,
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                }}
+                onClick={() => setSelectedProjectId(pid)}
+                actions={
+                  item.isSpecial
+                    ? undefined
+                    : [
+                        <Button key="edit" type="text" icon={<EditOutlined />} size="small" onClick={(e) => { e.stopPropagation(); handleEditProject(item) }} />,
+                        <Popconfirm
+                          key="delete"
+                          title="确认删除此项目？"
+                          description="项目下的文档将一并删除，无法恢复"
+                          onConfirm={(e) => { e?.stopPropagation(); handleDeleteProject(item.id) }}
+                          okText="删除"
+                          cancelText="取消"
+                        >
+                          <Button type="text" danger icon={<DeleteOutlined />} size="small" onClick={(e) => e.stopPropagation()} />
+                        </Popconfirm>,
+                      ]
+                }
+              >
+                <List.Item.Meta
+                  title={item.isSpecial ? <><Tag color="blue">默认</Tag>{item.name}</> : item.name}
+                  description={item.description}
+                />
+              </List.Item>
+            )
+          }}
         />
       </Card>
 
@@ -451,19 +498,9 @@ function KnowledgeBaseView() {
 
       {/* 上传区域 */}
       <Card className="upload-card">
-        <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span>导入到：</span>
-          <Select
-            value={uploadProjectId}
-            onChange={(v) => setUploadProjectId(v)}
-            style={{ minWidth: 160 }}
-            placeholder="通用知识"
-            options={[
-              { value: '__general__', label: '通用知识' },
-              ...projects.map(p => ({ value: p.id, label: p.name })),
-            ]}
-          />
-        </div>
+        <p style={{ marginBottom: 12, color: '#666' }}>
+          向「<strong>{selectedProjectName}</strong>」导入文档
+        </p>
         <div
           className={`upload-area ${isDragging ? 'dragging' : ''}`}
           onClick={handleSelectFiles}
@@ -507,7 +544,7 @@ function KnowledgeBaseView() {
             </Popconfirm>
           )
         }
-        loading={initialLoading} // 仅首次加载显示 loading
+        loading={initialLoading}
       >
         {documents.length === 0 ? (
           <Empty
@@ -520,7 +557,24 @@ function KnowledgeBaseView() {
             renderItem={(doc) => (
               <List.Item
                 actions={[
-                  // 重新处理按钮（ready 或 error 状态显示）
+                  // 移动按钮
+                  <Dropdown
+                    key="move"
+                    menu={{
+                      items: moveMenuItems.map(item => ({
+                        key: item.key,
+                        label: item.label,
+                        disabled: (item.key === '__general__' ? null : item.key) === doc.project_id,
+                      })),
+                      onClick: ({ key }) => {
+                        const targetPid = key === '__general__' ? null : key
+                        handleMoveDocument(doc.id, targetPid)
+                      },
+                    }}
+                  >
+                    <Button type="text" icon={<SwapOutlined />} size="small" title="移动到其他项目" />
+                  </Dropdown>,
+                  // 重新处理按钮
                   (doc.status === 'ready' || doc.status === 'error') && (
                     <Button
                       key="reprocess"
@@ -568,7 +622,6 @@ function KnowledgeBaseView() {
                     </>
                   }
                 />
-                {/* 状态标签 */}
                 <Tag color={statusConfig[doc.status]?.color || 'default'}>
                   {statusConfig[doc.status]?.text || doc.status}
                 </Tag>

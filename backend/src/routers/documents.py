@@ -459,6 +459,12 @@ async def get_document(doc_id: str) -> Document:
     return metadata[doc_id]
 
 
+class MoveDocumentRequest(BaseModel):
+    """移动文档请求"""
+
+    project_id: str | None = None  # 目标项目，null 表示通用知识
+
+
 class ChunkDetail(BaseModel):
     """单个分块详情"""
 
@@ -470,6 +476,44 @@ class ChunkDetail(BaseModel):
     index: int
     doc_name: str
     file_type: str
+
+
+@router.put("/{doc_id}/move")
+async def move_document(doc_id: str, req: MoveDocumentRequest) -> Document:
+    """
+    移动文档到另一个项目
+
+    更新 metadata JSON 和 LanceDB 中该文档所有 chunk 的 project_id。
+    不需要重新解析或重新向量化。
+    """
+    metadata = _load_metadata()
+    if doc_id not in metadata:
+        raise HTTPException(status_code=404, detail=f"文档不存在: {doc_id}")
+
+    doc = metadata[doc_id]
+    if doc.project_id == req.project_id:
+        return doc  # 无需移动
+
+    # 更新 metadata
+    metadata[doc_id].project_id = req.project_id
+    _save_metadata(metadata)
+
+    # 更新 LanceDB 中该文档所有 chunk 的 project_id
+    from ..rag.vector_store import get_db, CHUNKS_TABLE
+
+    db = get_db()
+    if CHUNKS_TABLE in db.table_names():
+        table = db.open_table(CHUNKS_TABLE)
+        safe_doc_id = doc_id.replace("'", "''")
+        rows = table.search().where(f"doc_id = '{safe_doc_id}'").limit(100000).to_arrow()
+        if len(rows) > 0:
+            import pandas as pd
+            df = rows.to_pandas()
+            df["project_id"] = req.project_id
+            table.update(df)
+            logger.info(f"[{doc_id[:8]}] 已移动 {len(df)} 个 chunk 到 project_id={req.project_id}")
+
+    return metadata[doc_id]
 
 
 @router.get("/{doc_id}/chunks/{chunk_index}", response_model=ChunkDetail)
