@@ -1,204 +1,185 @@
+#!/usr/bin/env python3
 """
-Seed script: inject demo meeting data for 丁二烯项目.
-
-Usage:
-    cd backend && python scripts/seed_meetings.py
+Seed demo data for the Meetings feature.
+Usage: python scripts/seed_meetings.py
+Requires backend running on port 8765.
 """
 
 import sys
-from pathlib import Path
-
-# Allow running from backend/ or project root
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-try:
-    import httpx
-except ImportError:
-    import subprocess
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "httpx", "-q"])
-    import httpx
+import httpx
 
 BASE = "http://127.0.0.1:8765"
 
 
 def main():
-    client = httpx.Client(base_url=BASE, timeout=15)
-
     # Health check
-    r = client.get("/health")
-    assert r.status_code == 200, f"Backend not healthy: {r.status_code}"
-    print("✓ Backend is healthy")
+    try:
+        r = httpx.get(f"{BASE}/health", timeout=5)
+        assert r.status_code == 200
+    except Exception:
+        print("❌ 后端未运行，请先启动应用")
+        sys.exit(1)
 
-    # --- 1. Create project ---
-    r = client.post("/projects", json={"name": "丁二烯项目", "description": "丁二烯装置岩土工程与基础设计"})
-    assert r.status_code in (200, 201, 409), f"Create project failed: {r.text}"
-    project = r.json() if r.status_code != 409 else _find_project(client, "丁二烯项目")
-    pid = project["id"]
-    print(f"✓ Project: {project['name']} ({pid})")
+    # Step 0: Clean up existing projects with similar names
+    print("🧹 清理旧数据...")
+    projects = httpx.get(f"{BASE}/projects").json()
+    for p in projects:
+        if "丁二烯" in p["name"] or "小爪" in p["name"] or "test" in p.get("name", "").lower():
+            httpx.delete(f"{BASE}/projects/{p['id']}")
+            print(f"  删除项目: {p['name']}")
 
-    # --- 2. Create meetings ---
+    # Step 1: Create project
+    print("\n📁 创建项目...")
+    proj = httpx.post(f"{BASE}/projects", json={
+        "name": "丁二烯项目",
+        "description": "2#丁二烯装置岩土工程审查及桩基设计",
+    }).json()
+    pid = proj["id"]
+    print(f"  ✓ {proj['name']} ({pid})")
+
+    # Step 2: Create meetings
+    print("\n📅 创建会议...")
     meetings_data = [
         {
             "title": "第1次岩土工程审查会",
             "date": "2026-03-10",
             "raw_text": (
-                "一、会议背景\n"
-                "本次会议针对丁二烯装置岩土工程勘察报告进行审查，重点讨论场地土层分布、地下水条件及地基处理方案。\n\n"
-                "二、参会人员\n"
-                "建设单位：张工、李工\n设计单位：王总工、赵工\n勘察单位：刘工\n\n"
-                "三、讨论内容\n"
-                "1. 场地地基土主要为粉质粘土和砂层，承载力特征值 fak=180kPa。\n"
-                "2. 地下水位埋深约2.5m，需考虑地下水对基础施工的影响。\n"
-                "3. 厂区部分地段存在软弱下卧层，需进行负摩阻力验算。\n"
-                "4. 抗震设防烈度为7度，设计基本地震加速度0.15g。\n\n"
-                "四、决议\n"
-                "（见下方决议卡片）"
+                "会议主题：浙石化二期丁二烯装置场地岩土工程参数审查\n\n"
+                "与会单位：建设单位、设计院、勘察单位（宁波冶金勘察设计院、浙江有色、浙江物探、上海昌发）\n\n"
+                "会议要点：\n"
+                "1. 各勘察单位汇报了勘察补充说明的主要内容，重点针对场地填土层厚度、软土分布及负摩阻力问题进行了说明。\n"
+                "2. 设计院提出桩基负摩阻力计算需要明确中性点位置，要求勘察单位提供各土层的极限侧阻力标准值和极限端阻力标准值。\n"
+                "3. 经讨论，一致认为应按《建筑桩基技术规范》JGJ 94-2008考虑负摩阻力影响，中性点深度取桩长入土深度的0.5~0.6倍。\n"
+                "4. 关于抗震设防参数，确认为8度（0.2g），第一组，场地类别III类。"
             ),
-            "resolutions": [
-                {
-                    "content": "场地地基承载力特征值取 fak=180kPa，采用天然地基方案时需进行详细验算，重点复核软弱下卧层承载力。对于荷载较大的构筑物区域（如塔器基础），应采用桩基础方案。",
-                    "index": 1,
-                },
-                {
-                    "content": "桩基设计负摩阻力计算采用《建筑桩基技术规范》(JGJ 94-2008) 第5.4节方法，中性点深度按 ln=0.8l0 估算（l0 为桩周软弱土层下限深度），负摩阻力标准值 qsi^n 按现场静力触探成果取值，粉质粘土层取 20kPa，淤泥质粘土层取 15kPa。",
-                    "index": 2,
-                },
-                {
-                    "content": "抗震设计采用振型分解反应谱法，场地类别为Ⅱ类，特征周期 Tg=0.35s。塔器等高耸构筑物需补充时程分析验算。",
-                    "index": 3,
-                },
-            ],
         },
         {
             "title": "第2次设计协调会",
             "date": "2026-03-25",
             "raw_text": (
-                "一、会议背景\n"
-                "根据第1次审查会决议，设计单位完成了桩基初步设计方案。本次会议协调桩基选型与施工方案的衔接问题。\n\n"
-                "二、讨论内容\n"
-                "1. 原方案采用 PHC 管桩，但场地砂层较厚，沉桩困难。\n"
-                "2. 建议改为钻孔灌注桩方案，桩径800mm，桩长25m。\n"
-                "3. 负摩阻力计算需结合新桩型重新验算。\n"
-                "4. 承台尺寸和配筋需优化。\n\n"
-                "三、决议\n"
-                "（见下方决议卡片）"
+                "会议主题：桩基设计方案调整协调\n\n"
+                "会议要点：\n"
+                "1. 根据勘察补充说明，场地存在较厚填土层（最大厚度达12m），设计院提出需要重新评估桩基方案。\n"
+                "2. 原方案采用φ600 PHC管桩，考虑到负摩阻力影响较大，决定改用φ800钻孔灌注桩，桩长适当加长。\n"
+                "3. 负摩阻力系数取值：填土层取0.30，淤泥质土取0.20，粉质粘土取0.25。\n"
+                "4. 单桩承载力特征值暂按2500kN估算，需施工图阶段进一步验算。\n"
+                "5. 桩端持力层选用⑥层粉砂层，进入持力层深度不小于2D。"
             ),
-            "resolutions": [
-                {
-                    "content": "桩基方案由 PHC 管桩调整为钻孔灌注桩，桩径 D=800mm，桩长 L=25m，混凝土强度等级 C30，以中风化砂岩为持力层，入岩深度不小于1.0D。单桩竖向承载力特征值 Ra 经验算取 2800kN。",
-                    "index": 1,
-                },
-                {
-                    "content": "承台厚度统一取 1200mm，混凝土等级 C35，保护层厚度 50mm（桩头嵌入部分）。承台配筋按《建筑地基基础设计规范》(GB 50007) 附录计算，底筋双向 HRB400 φ25@150。",
-                    "index": 2,
-                },
-            ],
         },
         {
             "title": "第3次技术交底会",
             "date": "2026-04-15",
             "raw_text": (
-                "一、会议背景\n"
-                "施工图设计基本完成，本次会议向施工单位进行技术交底，明确施工控制要点。\n\n"
-                "二、参会人员\n"
-                "建设单位：张工\n设计单位：王总工\n施工单位：陈经理、孙工\n监理单位：周工\n\n"
-                "三、讨论内容\n"
-                "1. 钻孔灌注桩施工质量控制要点。\n"
-                "2. 负摩阻力区域桩身加强措施。\n"
-                "3. 地下水控制方案。\n"
-                "4. 抗震构造措施。\n\n"
-                "四、决议\n"
-                "（见下方决议卡片）"
+                "会议主题：桩基施工技术交底及要求确认\n\n"
+                "会议要点：\n"
+                "1. 施工单位提出泥浆护壁成孔工艺在填土层中容易塌孔，经讨论同意采用全套管回转钻进工艺。\n"
+                "2. 桩基检测方案确定为：全部进行低应变检测，30%进行声波透射法检测，5根进行静载试验。\n"
+                "3. 对于单桩承载力特征值，考虑到实际桩长可能因地质条件变化而调整，同意施工中根据实际地层情况在±3m范围内调整桩长，但需经设计确认。\n"
+                "4. 关于负摩阻力计算，确认采用中性点法，中性点深度比取0.55，下拉荷载标准值按各勘察单位提供的参数取不利值。\n"
+                "5. 超灌高度不小于1.0m，凿除浮浆后桩顶标高应满足设计要求。"
             ),
-            "resolutions": [
-                {
-                    "content": "钻孔灌注桩施工严格执行《建筑桩基技术规范》(JGJ 94-2008) 要求：孔径偏差不超过 ±50mm，孔深不小于设计值，沉渣厚度不超过 50mm。灌注前需二次清孔，泥浆比重控制在 1.05~1.15 之间。桩身完整性检测采用低应变法，检测比例 100%。",
-                    "index": 1,
-                },
-                {
-                    "content": "负摩阻力区域（地面以下 0~15m 范围）桩身采用加强措施：纵向钢筋通长配置，并在该区段增设 HRB400 φ16@200 的螺旋箍筋，箍筋保护层厚度不小于 50mm。桩顶 3D 范围内箍筋加密为 φ16@100。",
-                    "index": 2,
-                },
-                {
-                    "content": "施工期间地下水位控制在基础底面以下 0.5m，采用轻型井点降水。基坑开挖边坡坡率 1:1.5，深度超过 3m 时需放坡并设置临时支护。开挖过程中加强监测，周边建筑物沉降观测点间距不大于 20m。",
-                    "index": 3,
-                },
-            ],
         },
     ]
 
-    created_meetings = []
-    for mtg in meetings_data:
-        r = client.post(f"/projects/{pid}/meetings", json={
-            "title": mtg["title"],
-            "date": mtg["date"],
-            "raw_text": mtg["raw_text"],
-        })
-        assert r.status_code in (200, 201), f"Create meeting failed: {r.text}"
-        meeting = r.json()
-        mid = meeting["id"]
-        print(f"✓ Meeting: {meeting['title']} ({mid})")
+    mtg_ids = []
+    for m in meetings_data:
+        resp = httpx.post(f"{BASE}/projects/{pid}/meetings", json=m).json()
+        mtg_ids.append(resp["id"])
+        print(f"  ✓ {m['title']} ({resp['id']})")
 
-        created_resolutions = []
-        for res in mtg["resolutions"]:
-            r = client.post(f"/meetings/{mid}/resolutions", json={
-                "content": res["content"],
-                "index": res["index"],
+    # Step 3: Create resolutions
+    print("\n📝 创建决议...")
+    resolutions_data = {
+        # Meeting 1
+        mtg_ids[0]: [
+            {
+                "content": "桩基负摩阻力计算按《建筑桩基技术规范》JGJ 94-2008执行，中性点深度取桩长入土深度的0.5~0.6倍，具体取值根据各勘察单位提供的地层参数确定。",
+                "index": 1,
+                "status": "superseded",
+            },
+            {
+                "content": "抗震设防参数确认为8度（0.2g），设计地震分组第一组，场地类别III类，特征周期0.45s。",
+                "index": 2,
                 "status": "active",
-            })
-            assert r.status_code in (200, 201), f"Create resolution failed: {r.text}"
-            resolution = r.json()
-            created_resolutions.append(resolution)
-            print(f"  ✓ Resolution {res['index']}: {resolution['id']}")
+            },
+            {
+                "content": "要求各勘察单位于两周内提交正式的勘察补充说明文件，明确各土层的桩基设计参数。",
+                "index": 3,
+                "status": "active",
+            },
+        ],
+        # Meeting 2
+        mtg_ids[1]: [
+            {
+                "content": "桩基方案由φ600 PHC管桩调整为φ800钻孔灌注桩，桩长根据持力层深度确定，以⑥层粉砂层为桩端持力层，进入持力层深度不小于2D。",
+                "index": 1,
+                "status": "amended",
+            },
+            {
+                "content": "负摩阻力系数取值确认为：填土层0.30，淤泥质土0.20，粉质粘土0.25。单桩承载力特征值暂按2500kN估算。",
+                "index": 2,
+                "status": "active",
+            },
+        ],
+        # Meeting 3
+        mtg_ids[2]: [
+            {
+                "content": "抗震设防参数补充说明：场地类别III类，设计特征周期0.45s。场地存在液化土层（②层粉砂），液化等级为轻微，桩基设计可不考虑液化影响。",
+                "index": 1,
+                "status": "active",
+            },
+            {
+                "content": "桩基施工工艺调整为全套管回转钻进工艺（替代原泥浆护壁方案），以应对填土层塌孔风险。桩长可在±3m范围内根据实际地层调整，但需设计确认。",
+                "index": 2,
+                "status": "active",
+            },
+            {
+                "content": "桩基检测方案：全部低应变检测、30%声波透射法检测、5根静载试验。超灌高度不小于1.0m。",
+                "index": 3,
+                "status": "active",
+            },
+        ],
+    }
 
-        created_meetings.append({"meeting": meeting, "resolutions": created_resolutions})
+    res_map = {}  # (meeting_idx, res_index) -> res_id
+    for mtg_id, res_list in resolutions_data.items():
+        mtg_idx = mtg_ids.index(mtg_id)
+        for rd in res_list:
+            resp = httpx.post(f"{BASE}/meetings/{mtg_id}/resolutions", json=rd).json()
+            res_map[(mtg_idx, rd["index"])] = resp["id"]
+            print(f"  ✓ [{meetings_data[mtg_idx]['title']}] 决议{rd['index']}: {resp['id']} ({rd['status']})")
 
-    # --- 3. Create relations ---
-    # 第2次会议决议1 SUPERSEDES 第1次会议决议1
-    rel1 = client.post("/resolutions/relations", json={
-        "from_id": created_meetings[1]["resolutions"][0]["id"],
-        "to_id": created_meetings[0]["resolutions"][0]["id"],
-        "relation_type": "SUPERSEDES",
-        "meeting_id": created_meetings[1]["meeting"]["id"],
-        "reason": "桩基方案由PHC管桩调整为钻孔灌注桩，原天然地基/管桩方案决议不再适用",
-        "change_summary": "桩型由PHC管桩改为钻孔灌注桩，桩径800mm，桩长25m",
-    })
-    assert rel1.status_code == 200, f"Create relation failed: {rel1.text}"
-    print("✓ Relation: M2-R1 SUPERSEDES M1-R1")
+    # Step 4: Create relations
+    print("\n🔗 创建关联关系...")
+    relations = [
+        {
+            "desc": "第2次会议决议1 SUPERSEDES 第1次会议决议1",
+            "from_id": res_map[(1, 1)],
+            "to_id": res_map[(0, 1)],
+            "relation_type": "SUPERSEDES",
+            "reason": "桩基方案由PHC管桩改为灌注桩，原负摩阻力计算方法决议被新方案替代",
+        },
+        {
+            "desc": "第3次会议决议2 AMENDS 第2次会议决议1",
+            "from_id": res_map[(2, 2)],
+            "to_id": res_map[(1, 1)],
+            "relation_type": "AMENDS",
+            "change_summary": "补充施工工艺要求（全套管回转钻进），并允许桩长±3m调整",
+        },
+        {
+            "desc": "第3次会议决议1 SUPPLEMENTS 第1次会议决议2",
+            "from_id": res_map[(2, 1)],
+            "to_id": res_map[(0, 2)],
+            "relation_type": "SUPPLEMENTS",
+            "supplement_content": "补充场地液化评价结论及对桩基设计的影响说明",
+        },
+    ]
 
-    # 第3次会议决议2 AMENDS 第2次会议决议1
-    rel2 = client.post("/resolutions/relations", json={
-        "from_id": created_meetings[2]["resolutions"][1]["id"],
-        "to_id": created_meetings[1]["resolutions"][0]["id"],
-        "relation_type": "AMENDS",
-        "meeting_id": created_meetings[2]["meeting"]["id"],
-        "reason": "增加负摩阻力区段桩身加强措施要求",
-        "change_summary": "补充0~15m范围螺旋箍筋加强和桩顶加密要求",
-    })
-    assert rel2.status_code == 200, f"Create relation failed: {rel2.text}"
-    print("✓ Relation: M3-R2 AMENDS M2-R1")
+    for rel in relations:
+        resp = httpx.post(f"{BASE}/resolutions/relations", json=rel)
+        print(f"  ✓ {rel['desc']}")
 
-    # 第3次会议决议1 SUPPLEMENTS 第1次会议决议2
-    rel3 = client.post("/resolutions/relations", json={
-        "from_id": created_meetings[2]["resolutions"][0]["id"],
-        "to_id": created_meetings[0]["resolutions"][1]["id"],
-        "relation_type": "SUPPLEMENTS",
-        "meeting_id": created_meetings[2]["meeting"]["id"],
-        "reason": "对钻孔灌注桩施工质量提出具体控制要求，补充原决议的计算方法",
-        "supplement_content": "孔径偏差±50mm，沉渣厚度≤50mm，低应变检测100%",
-    })
-    assert rel3.status_code == 200, f"Create relation failed: {rel3.text}"
-    print("✓ Relation: M3-R1 SUPPLEMENTS M1-R2")
-
-    print("\n✅ Seed data created successfully!")
-
-
-def _find_project(client: httpx.Client, name: str) -> dict:
-    r = client.get("/projects")
-    for p in r.json():
-        if p["name"] == name:
-            return p
-    raise RuntimeError(f"Project '{name}' not found")
+    print("\n✅ Demo 数据注入完成！打开应用查看「会议纪要」页面。")
 
 
 if __name__ == "__main__":
