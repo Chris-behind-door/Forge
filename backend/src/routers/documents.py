@@ -515,13 +515,11 @@ async def move_document(doc_id: str, req: MoveDocumentRequest) -> Document:
     if CHUNKS_TABLE in db.table_names():
         table = db.open_table(CHUNKS_TABLE)
         safe_doc_id = doc_id.replace("'", "''")
-        rows = table.search().where(f"doc_id = '{safe_doc_id}'").limit(100000).to_arrow()
-        if len(rows) > 0:
-            import pandas as pd
-            df = rows.to_pandas()
-            df["project_id"] = req.project_id
-            table.update(df)
-            logger.info(f"[{doc_id[:8]}] 已移动 {len(df)} 个 chunk 到 project_id={req.project_id}")
+        table.update(
+            where=f"doc_id = '{safe_doc_id}'",
+            values={"project_id": req.project_id},
+        )
+        logger.info(f"[{doc_id[:8]}] 已移动到 project_id={req.project_id}")
 
     return metadata[doc_id]
 
