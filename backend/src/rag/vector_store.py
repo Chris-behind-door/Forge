@@ -19,11 +19,11 @@ import lancedb
 from lancedb.pydantic import LanceModel, Vector
 from pydantic import Field
 
-logger = logging.getLogger(__name__)
-
 from ..utils.paths import VECTOR_DIR
 from .embeddings import EMBEDDING_DIM, embed_query, embed_texts
-from .scoring import compute_hybrid_score, cosine_to_score, rank_candidates
+from .scoring import rank_candidates
+
+logger = logging.getLogger(__name__)
 
 # 表名
 CHUNKS_TABLE = "chunks"

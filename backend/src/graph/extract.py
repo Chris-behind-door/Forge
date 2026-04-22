@@ -231,11 +231,11 @@ async def find_and_create_links(
             # Update status for SUPERSEDES
             if rel_type == "SUPERSEDES":
                 # Update JSON
-                from ..routers.meetings import _load_resolutions, _save_resolutions
-                resolutions = _load_resolutions()
+                from ..resolution_store import load_resolutions, save_resolutions
+                resolutions = load_resolutions()
                 if existing_id in resolutions:
                     resolutions[existing_id]["status"] = "superseded"
-                    _save_resolutions(resolutions)
+                    save_resolutions(resolutions)
                 await gq.update_resolution(existing_id, status="superseded")
 
             confirmed_relations.append({

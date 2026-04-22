@@ -47,18 +47,15 @@ def _save_meetings(data: dict) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+from ..resolution_store import load_resolutions, save_resolutions as _save_resolutions_json
+
+
 def _load_resolutions() -> dict[str, dict]:
-    _ensure_dir()
-    if not RESOLUTIONS_FILE.exists():
-        return {}
-    with open(RESOLUTIONS_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return load_resolutions()
 
 
 def _save_resolutions(data: dict) -> None:
-    _ensure_dir()
-    with open(RESOLUTIONS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    _save_resolutions_json(data)
 
 
 # ---- Meetings ----

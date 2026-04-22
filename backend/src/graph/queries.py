@@ -87,6 +87,7 @@ async def delete_resolution(res_id: str) -> None:
         await exec_query(
             f"MATCH (a:Resolution)-[e:{rel_type}]->(b:Resolution) "
             "WHERE a.id = $id OR b.id = $id DELETE e",
+            {"id": res_id},
         )
         await exec_query(
             f"MATCH (a:Resolution)<-[e:{rel_type}]-(b:Resolution) "
