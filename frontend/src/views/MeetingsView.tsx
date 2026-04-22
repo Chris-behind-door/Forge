@@ -14,7 +14,7 @@ import {
   Upload, Popconfirm, Alert,
 } from 'antd'
 import {
-  PlusOutlined, CalendarOutlined, LinkOutlined, FileTextOutlined,
+  PlusOutlined, CalendarOutlined, FileTextOutlined,
   UploadOutlined, RobotOutlined, CheckCircleOutlined,
   DeleteOutlined, EditOutlined, ArrowRightOutlined, ArrowLeftOutlined,
   LoadingOutlined,
@@ -73,7 +73,7 @@ const relationTypeLabels: Record<string, { color: string; label: string; verb: s
   SUPPLEMENTS: { color: 'blue', label: '补充', verb: '补充了', passiveVerb: '被…补充' },
 }
 
-const LONG_OP_HINT = '（处理可能需要几分钟，请耐心等待）'
+const LONG_OP_HINT = '处理可能需要几分钟，请耐心等待。'
 
 // ============ 主组件 ============
 
@@ -432,8 +432,7 @@ function MeetingsView() {
                         </div>
                         <Popconfirm
                           title="确定删除此会议及其所有决议？"
-                          onConfirm={(e) => { e?.stopPropagation(); handleDeleteMeeting(mtg.id) }}
-                          onCancel={(e) => e?.stopPropagation()}
+                          onConfirm={() => handleDeleteMeeting(mtg.id)}
                         >
                           <Button
                             type="text"
