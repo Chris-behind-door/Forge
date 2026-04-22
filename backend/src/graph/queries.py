@@ -34,16 +34,21 @@ async def exec_query(cypher: str, params: dict[str, Any] | None = None) -> list[
 async def create_resolution(res_id: str, meeting_id: str, project_id: str,
                             content: str, idx: int, status: str = "active",
                             source_doc_id: str | None = None,
-                            created_at: str = "") -> None:
+                            created_at: str = "",
+                            embedding: list[float] | None = None) -> None:
+    # Kùzu requires a default for FLOAT[] if we pass null
+    emb = embedding if embedding is not None else [0.0] * 512
     await exec_query(
         """CREATE (r:Resolution {
             id: $id, meeting_id: $meeting_id, project_id: $project_id,
             content: $content, idx: $idx, status: $status,
-            source_doc_id: $source_doc_id, created_at: $created_at
+            source_doc_id: $source_doc_id, created_at: $created_at,
+            embedding: $embedding
         })""",
         {"id": res_id, "meeting_id": meeting_id, "project_id": project_id,
          "content": content, "idx": idx, "status": status,
-         "source_doc_id": source_doc_id or "", "created_at": created_at},
+         "source_doc_id": source_doc_id or "", "created_at": created_at,
+         "embedding": emb},
     )
 
 
@@ -60,8 +65,18 @@ async def get_resolution(res_id: str) -> dict[str, Any] | None:
 async def update_resolution(res_id: str, **kwargs: Any) -> None:
     if not kwargs:
         return
-    sets = ", ".join(f"r.{k} = ${k}" for k in kwargs)
-    params = {"id": res_id, **kwargs}
+    # Handle embedding specially: list → Kùzu array literal
+    if "embedding" in kwargs and kwargs["embedding"] is not None:
+        emb = kwargs.pop("embedding")
+        sets = ", ".join(f"r.{k} = ${k}" for k in kwargs)
+        sets += ", r.embedding = $embedding"
+        params = {"id": res_id, **kwargs, "embedding": emb}
+    else:
+        kwargs.pop("embedding", None)  # remove None embedding
+        sets = ", ".join(f"r.{k} = ${k}" for k in kwargs)
+        params = {"id": res_id, **kwargs}
+    if not sets:
+        return
     await exec_query(f"MATCH (r:Resolution) WHERE r.id = $id SET {sets}", params)
 
 
@@ -178,6 +193,26 @@ async def add_project_meeting(project_id: str, meeting_id: str) -> None:
         "CREATE (p)-[:CONTAINS_MEETING]->(m)",
         {"pid": project_id, "mid": meeting_id},
     )
+
+
+async def search_similar_resolutions(
+    project_id: str, query_embedding: list[float], top_k: int = 5
+) -> list[dict[str, Any]]:
+    """Vector search for similar resolutions within a project using Kùzu."""
+    rows = await exec_query(
+        "MATCH (r:Resolution) WHERE r.project_id = $pid AND r.status = 'active' "
+        "RETURN r.id, r.content, r.meeting_id, r.status, r.idx, "
+        "array_cosine_similarity(r.embedding, $emb) AS score "
+        "ORDER BY score DESC LIMIT $k",
+        {"pid": project_id, "emb": query_embedding, "k": top_k},
+    )
+    results = []
+    for row in rows:
+        results.append({
+            "id": row[0], "content": row[1], "meeting_id": row[2],
+            "status": row[3], "index": row[4], "score": row[5],
+        })
+    return results
 
 
 async def add_meeting_resolution(meeting_id: str, resolution_id: str) -> None:

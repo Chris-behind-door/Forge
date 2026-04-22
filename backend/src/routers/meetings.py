@@ -4,11 +4,12 @@ Meeting, Resolution, and Relation API routes.
 
 import json
 import logging
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 
 from ..models.meeting import (
     Meeting, MeetingCreate, MeetingUpdate,
@@ -16,6 +17,8 @@ from ..models.meeting import (
     RelationCreate,
 )
 from ..graph import queries as gq
+from ..graph.extract import extract_resolutions, find_and_create_links
+from ..rag.embeddings import embed_texts
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +184,19 @@ async def create_resolution(meeting_id: str, req: ResolutionCreate) -> Resolutio
     )
     await gq.add_meeting_resolution(meeting_id, res_id)
 
+    # Generate embedding asynchronously
+    try:
+        emb = embed_texts([req.content])[0]
+        await gq.update_resolution(res_id, embedding=emb)
+        # Store in JSON too
+        resolutions = _load_resolutions()
+        if res_id in resolutions:
+            # Don't store full 512-dim vector in JSON, just mark as embedded
+            resolutions[res_id]["_embedded"] = True
+            _save_resolutions(resolutions)
+    except Exception as e:
+        logger.warning("Failed to generate embedding for resolution %s: %s", res_id, e)
+
     return resolution
 
 
@@ -266,3 +282,203 @@ async def list_active_resolutions(project_id: str) -> list[Resolution]:
 @router.get("/projects/{project_id}/graph")
 async def get_project_graph(project_id: str) -> dict:
     return await gq.get_project_graph(project_id)
+
+
+# ---- File Upload + Extraction ----
+
+# Supported file extensions and their text extraction
+_SUPPORTED_EXTENSIONS = {".pdf", ".txt", ".md", ".doc", ".docx"}
+
+
+def _extract_text_from_file(file_path: Path, suffix: str) -> str:
+    """Extract plain text from an uploaded file."""
+    if suffix in (".txt", ".md"):
+        return file_path.read_text(encoding="utf-8", errors="replace")
+    elif suffix == ".pdf":
+        from ..parsers.pdf import parse_pdf
+        chunks = parse_pdf(str(file_path))
+        return "\n\n".join(c["text"] for c in chunks)
+    elif suffix in (".doc", ".docx"):
+        try:
+            import docx
+            doc = docx.Document(str(file_path))
+            return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        except ImportError:
+            raise HTTPException(
+                status_code=400,
+                detail="Word 文档解析需要 python-docx 库，请运行: pip install python-docx",
+            )
+    else:
+        raise HTTPException(status_code=400, detail=f"不支持的文件格式: {suffix}")
+
+
+@router.post("/projects/{project_id}/meetings/import")
+async def import_meeting_with_file(
+    project_id: str,
+    date: str = Form(...),
+    title: str = Form(""),
+    file: UploadFile = File(...),
+) -> dict:
+    """
+    Upload a meeting notes file (PDF/TXT/MD/DOC/DOCX), extract text,
+    create meeting, then auto-extract resolutions and link to existing ones.
+    """
+    if not date:
+        raise HTTPException(status_code=400, detail="会议日期为必填字段")
+
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in _SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的文件格式: {suffix}，支持: {', '.join(_SUPPORTED_EXTENSIONS)}",
+        )
+
+    # Save uploaded file to temp, extract text
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        content = await file.read()
+        tmp.write(content)
+        tmp_path = Path(tmp.name)
+
+    try:
+        raw_text = _extract_text_from_file(tmp_path, suffix)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    if not raw_text.strip():
+        raise HTTPException(status_code=400, detail="文件中未提取到有效文本")
+
+    # Use filename as title if not provided
+    meeting_title = title or Path(file.filename or "会议纪要").stem
+
+    # Create meeting
+    meeting_id = f"mtg_{uuid4().hex[:8]}"
+    now = datetime.now().isoformat()
+    meeting = Meeting(
+        id=meeting_id, project_id=project_id,
+        title=meeting_title, date=date,
+        raw_text=raw_text, created_at=now,
+    )
+    meetings = _load_meetings()
+    meetings[meeting_id] = meeting.model_dump()
+    _save_meetings(meetings)
+
+    await gq.exec_query(
+        "CREATE (m:Meeting {id: $id, project_id: $pid, title: $title, date: $date, "
+        "summary: $summary, source_doc_id: $sdoc, raw_text: $raw, created_at: $cat})",
+        {"id": meeting_id, "pid": project_id, "title": meeting_title, "date": date,
+         "summary": "", "sdoc": "", "raw": raw_text, "cat": now},
+    )
+    await gq.add_project_meeting(project_id, meeting_id)
+
+    # Step 1: Extract resolutions via LLM
+    extracted = await extract_resolutions(raw_text, date)
+
+    if not extracted:
+        return {
+            "meeting": meeting.model_dump(),
+            "resolutions": [],
+            "relations": [],
+            "message": "未提取到决议",
+        }
+
+    # Step 2: Create resolution nodes + embeddings
+    resolutions_data = []
+    for ext in extracted:
+        res_id = f"res_{uuid4().hex[:8]}"
+        ext["id"] = res_id
+        ext["meeting_id"] = meeting_id
+        ext["project_id"] = project_id
+
+        resolution = Resolution(
+            id=res_id, meeting_id=meeting_id, project_id=project_id,
+            content=ext["content"], index=ext.get("index", 0),
+            status="active", created_at=now,
+        )
+        resolutions_data.append(resolution.model_dump())
+
+        # Save to JSON
+        all_res = _load_resolutions()
+        all_res[res_id] = resolution.model_dump()
+        _save_resolutions(all_res)
+
+        # Generate embedding
+        try:
+            emb = embed_texts([ext["content"]])[0]
+        except Exception as e:
+            logger.warning("Embedding failed for %s: %s", res_id, e)
+            emb = None
+
+        await gq.create_resolution(
+            res_id, meeting_id, project_id, ext["content"],
+            ext.get("index", 0), "active", None, now,
+            embedding=emb,
+        )
+        await gq.add_meeting_resolution(meeting_id, res_id)
+
+    # Step 3: Find cross-meeting links
+    relations = await find_and_create_links(
+        extracted, project_id, meeting_id,
+    )
+
+    return {
+        "meeting": meeting.model_dump(),
+        "resolutions": resolutions_data,
+        "relations": relations,
+        "message": f"提取了 {len(resolutions_data)} 条决议，建立了 {len(relations)} 条关联",
+    }
+
+
+@router.post("/meetings/{meeting_id}/extract")
+async def extract_meeting_resolutions(meeting_id: str) -> dict:
+    """Extract resolutions from an existing meeting's raw_text."""
+    meetings = _load_meetings()
+    if meeting_id not in meetings:
+        raise HTTPException(status_code=404, detail="会议不存在")
+    meeting = meetings[meeting_id]
+    raw_text = meeting.get("raw_text", "")
+    project_id = meeting["project_id"]
+
+    if not raw_text.strip():
+        raise HTTPException(status_code=400, detail="该会议没有纪要文本")
+
+    extracted = await extract_resolutions(raw_text, meeting.get("date", ""))
+
+    if not extracted:
+        return {"meeting_id": meeting_id, "resolutions": [], "relations": []}
+
+    now = datetime.now().isoformat()
+    resolutions_data = []
+    for ext in extracted:
+        res_id = f"res_{uuid4().hex[:8]}"
+        ext["id"] = res_id
+
+        resolution = Resolution(
+            id=res_id, meeting_id=meeting_id, project_id=project_id,
+            content=ext["content"], index=ext.get("index", 0),
+            status="active", created_at=now,
+        )
+        resolutions_data.append(resolution.model_dump())
+
+        all_res = _load_resolutions()
+        all_res[res_id] = resolution.model_dump()
+        _save_resolutions(all_res)
+
+        try:
+            emb = embed_texts([ext["content"]])[0]
+        except Exception:
+            emb = None
+
+        await gq.create_resolution(
+            res_id, meeting_id, project_id, ext["content"],
+            ext.get("index", 0), "active", None, now,
+            embedding=emb,
+        )
+        await gq.add_meeting_resolution(meeting_id, res_id)
+
+    relations = await find_and_create_links(extracted, project_id, meeting_id)
+
+    return {
+        "meeting_id": meeting_id,
+        "resolutions": resolutions_data,
+        "relations": relations,
+    }

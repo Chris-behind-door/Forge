@@ -50,6 +50,7 @@ SCHEMAS = [
         status STRING DEFAULT 'active',
         source_doc_id STRING,
         created_at STRING,
+        embedding FLOAT[512],
         PRIMARY KEY (id)
     )""",
     # Rel tables
@@ -83,6 +84,13 @@ def _init_schema(conn: kuzu.Connection) -> None:
             conn.execute(ddl)
         except Exception:
             pass  # table already exists
+
+    # Migration: add embedding field if missing (Kùzu doesn't support ALTER TABLE,
+    # but IF NOT EXISTS on CREATE handles fresh DBs)
+    try:
+        conn.execute("ALTER TABLE Resolution ADD embedding FLOAT[512] DEFAULT [0.0]*512")
+    except Exception:
+        pass  # column already exists or Kùzu doesn't support ALTER
 
 
 def _ensure_db() -> None:

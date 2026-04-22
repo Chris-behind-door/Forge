@@ -10,9 +10,11 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Card, Timeline, Tag, Button, Modal, Form, Input, Empty,
   Select, DatePicker, Collapse, message, Spin, Tooltip,
+  Upload,
 } from 'antd'
 import {
   PlusOutlined, CalendarOutlined, LinkOutlined, FileTextOutlined,
+  UploadOutlined, RobotOutlined, CheckCircleOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { getApiBase } from '../api'
@@ -83,8 +85,17 @@ function MeetingsView() {
   // Modal states
   const [newMeetingOpen, setNewMeetingOpen] = useState(false)
   const [newResolutionOpen, setNewResolutionOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [importLoading, setImportLoading] = useState(false)
+  const [extractResult, setExtractResult] = useState<{
+    meeting: Meeting
+    resolutions: Resolution[]
+    relations: any[]
+    message: string
+  } | null>(null)
   const [meetingForm] = Form.useForm()
   const [resolutionForm] = Form.useForm()
+  const [importForm] = Form.useForm()
 
   // Highlighted resolution (for jump-to)
   const [highlightedResId, setHighlightedResId] = useState<string | null>(null)
@@ -272,14 +283,24 @@ function MeetingsView() {
           <div className="sidebar-section-header">
             <span>会议时间线</span>
             {selectedProjectId && (
-              <Button
-                type="link"
-                size="small"
-                icon={<PlusOutlined />}
-                onClick={() => setNewMeetingOpen(true)}
-              >
-                新建
-              </Button>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<PlusOutlined />}
+                  onClick={() => setNewMeetingOpen(true)}
+                >
+                  新建
+                </Button>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<UploadOutlined />}
+                  onClick={() => { importForm.resetFields(); setExtractResult(null); setImportOpen(true) }}
+                >
+                  导入
+                </Button>
+              </div>
             )}
           </div>
           <Spin spinning={meetingsLoading}>
@@ -339,6 +360,30 @@ function MeetingsView() {
                   }}
                 >
                   添加决议
+                </Button>
+                <Button
+                  icon={<RobotOutlined />}
+                  onClick={async () => {
+                    if (!selectedMeeting) return
+                    try {
+                      message.loading({ content: '正在提取决议...', key: 'extract', duration: 0 })
+                      const res = await fetch(`${getApiBase()}/meetings/${selectedMeeting.id}/extract`, {
+                        method: 'POST',
+                      })
+                      if (res.ok) {
+                        const data = await res.json()
+                        message.success({ content: data.message || `提取了 ${data.resolutions?.length || 0} 条决议`, key: 'extract' })
+                        fetchResolutions(selectedMeeting.id)
+                      } else {
+                        const err = await res.json()
+                        message.error({ content: err.detail || '提取失败', key: 'extract' })
+                      }
+                    } catch {
+                      message.error({ content: '提取失败', key: 'extract' })
+                    }
+                  }}
+                >
+                  AI 提取决议
                 </Button>
               </div>
             </Card>
@@ -455,6 +500,93 @@ function MeetingsView() {
             <Input.TextArea rows={4} placeholder="输入决议内容" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* 导入纪要 Modal */}
+      <Modal
+        title="导入会议纪要"
+        open={importOpen}
+        onCancel={() => { setImportOpen(false); setExtractResult(null); importForm.resetFields() }}
+        footer={extractResult ? [
+          <Button key="close" onClick={() => { setImportOpen(false); setExtractResult(null); importForm.resetFields() }}>
+            关闭
+          </Button>,
+        ] : undefined}
+        okText={importLoading ? '处理中...' : '导入并提取'}
+        onOk={() => importForm.submit()}
+        confirmLoading={importLoading}
+        width={720}
+      >
+        {extractResult ? (
+          <div>
+            <div style={{ marginBottom: 12, padding: '8px 12px', background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f' }}>
+              <CheckCircleOutlined style={{ color: '#52c41a', marginRight: 8 }} />
+              {extractResult.message}
+            </div>
+            {extractResult.resolutions.length > 0 && (
+              <div>
+                <h4 style={{ margin: '12px 0 8px' }}>提取的决议：</h4>
+                {extractResult.resolutions.map((r: any, idx: number) => (
+                  <Card key={r.id || idx} size="small" style={{ marginBottom: 8, borderLeft: '3px solid #52c41a' }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>决议 {r.index}</div>
+                    <div style={{ color: '#444', fontSize: 13 }}>{r.content}</div>
+                  </Card>
+                ))}
+              </div>
+            )}
+            {extractResult.relations.length > 0 && (
+              <div>
+                <h4 style={{ margin: '12px 0 8px' }}>检测到的关联：</h4>
+                {extractResult.relations.map((rel: any, idx: number) => (
+                  <div key={idx} style={{ marginBottom: 6, fontSize: 13, color: '#555' }}>
+                    <Tag color={rel.type === 'SUPERSEDES' ? 'red' : rel.type === 'AMENDS' ? 'orange' : 'blue'}>
+                      {rel.type === 'SUPERSEDES' ? '替代' : rel.type === 'AMENDS' ? '修订' : '补充'}
+                    </Tag>
+                    <span>{rel.reason}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <Form form={importForm} layout="vertical" onFinish={async (values) => {
+            if (!selectedProjectId || !values.file?.[0]) return
+            setImportLoading(true)
+            try {
+              const formData = new FormData()
+              formData.append('file', values.file[0])
+              formData.append('date', values.date?.format('YYYY-MM-DD') || '')
+              formData.append('title', values.title || '')
+              const res = await fetch(`${getApiBase()}/projects/${selectedProjectId}/meetings/import`, {
+                method: 'POST',
+                body: formData,
+              })
+              if (res.ok) {
+                const data = await res.json()
+                setExtractResult(data)
+                fetchMeetings(selectedProjectId)
+              } else {
+                const err = await res.json()
+                message.error(err.detail || '导入失败')
+              }
+            } catch {
+              message.error('导入失败')
+            }
+            setImportLoading(false)
+          }}>
+            <Form.Item name="file" label="纪要文件" rules={[{ required: true, message: '请选择文件' }]}>
+              <Upload beforeUpload={() => false} maxCount={1} accept=".pdf,.txt,.md,.doc,.docx">
+                <Button icon={<UploadOutlined />}>选择文件</Button>
+              </Upload>
+            </Form.Item>
+            <Form.Item name="date" label="会议日期" rules={[{ required: true, message: '请选择日期' }]}>
+              <DatePicker style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="title" label="会议标题（可选）">
+              <Input placeholder="留空则使用文件名" />
+            </Form.Item>
+          </Form>
+        )}
       </Modal>
     </div>
   )
