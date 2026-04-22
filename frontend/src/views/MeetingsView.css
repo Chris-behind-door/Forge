@@ -66,6 +66,22 @@
   margin-bottom: 2px;
 }
 
+.timeline-item-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.timeline-delete-btn {
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.timeline-item:hover .timeline-delete-btn {
+  opacity: 1;
+}
+
 .timeline-item-title {
   font-size: 14px;
   color: #333;
@@ -93,6 +109,12 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+}
+
+.meeting-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .meeting-title {
@@ -155,6 +177,12 @@
   margin-bottom: 8px;
 }
 
+.resolution-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .resolution-index {
   font-weight: 600;
   color: #333;
@@ -199,6 +227,12 @@
   color: #1890ff;
   margin-top: 2px;
   flex-shrink: 0;
+}
+
+.relation-direction {
+  color: #555;
+  font-size: 12px;
+  margin-right: 2px;
 }
 
 .relation-summary {
