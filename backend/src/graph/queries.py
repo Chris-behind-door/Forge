@@ -68,8 +68,9 @@ async def update_resolution(res_id: str, **kwargs: Any) -> None:
     # Handle embedding specially: list → Kùzu array literal
     if "embedding" in kwargs and kwargs["embedding"] is not None:
         emb = kwargs.pop("embedding")
-        sets = ", ".join(f"r.{k} = ${k}" for k in kwargs)
-        sets += ", r.embedding = $embedding"
+        parts = [f"r.{k} = ${k}" for k in kwargs]
+        parts.append("r.embedding = $embedding")
+        sets = ", ".join(parts)
         params = {"id": res_id, **kwargs, "embedding": emb}
     else:
         kwargs.pop("embedding", None)  # remove None embedding
