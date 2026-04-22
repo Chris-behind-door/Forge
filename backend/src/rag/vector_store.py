@@ -13,7 +13,6 @@
 """
 
 import logging
-import re
 from typing import Any
 
 import lancedb
@@ -24,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 from ..utils.paths import VECTOR_DIR
 from .embeddings import EMBEDDING_DIM, embed_query, embed_texts
+from .scoring import compute_hybrid_score, cosine_to_score, rank_candidates
 
 # 表名
 CHUNKS_TABLE = "chunks"
@@ -67,46 +67,6 @@ def _get_or_create_table(db: lancedb.DBConnection) -> lancedb.table.Table:
             return db.create_table(CHUNKS_TABLE, schema=ChunkRecord)
         return table
     return db.create_table(CHUNKS_TABLE, schema=ChunkRecord)
-
-
-def _compute_keyword_score(query: str, text: str) -> float:
-    """
-    计算关键词匹配分数（简单版）
-
-    匹配规则：
-    - 查询词中的每个字符如果在文本中出现，加分
-    - 连续匹配额外加分
-
-    Args:
-        query: 查询字符串
-        text: 文档文本
-
-    Returns:
-        0-1 之间的分数
-    """
-    # 预处理：移除标点和空白，转小写
-    query_clean = re.sub(r"[^\w\u4e00-\u9fff]", "", query.lower())
-    text_clean = re.sub(r"[^\w\u4e00-\u9fff]", "", text.lower())
-
-    if not query_clean or not text_clean:
-        return 0.0
-
-    # 统计查询词中字符在文本中出现的比例
-    matched_chars = sum(1 for c in query_clean if c in text_clean)
-    char_ratio = matched_chars / len(query_clean)
-
-    # 检查是否有连续子串匹配（加分）
-    # 尝试 2-4 字符的子串
-    bonus = 0.0
-    for n in range(2, min(5, len(query_clean) + 1)):
-        for i in range(len(query_clean) - n + 1):
-            substring = query_clean[i : i + n]
-            if substring in text_clean:
-                bonus += 0.1 * n  # 越长的匹配加分越多
-
-    # 最终分数：字符匹配 + 连续匹配奖励，限制在 0-1
-    score = min(1.0, char_ratio * 0.5 + bonus)
-    return score
 
 
 def add_chunks(doc_id: str, chunks: list[dict], project_id: str | None = None) -> int:
@@ -214,20 +174,12 @@ def search_similar(query: str, top_k: int = 5, project_id: str | None = None) ->
     if not candidates:
         return []
 
-    # 计算每个候选的混合分数
-    scored_results = []
+    # 构建候选列表
+    raw_candidates = []
     for r in candidates:
-        # 向量分数（距离越小越好，转换为 0-1 范围）
         vector_distance = getattr(r, "_distance", 1.0)
         vector_score = 1.0 / (1.0 + vector_distance)
-
-        # 关键词匹配分数
-        keyword_score = _compute_keyword_score(query, r.text)
-
-        # 混合分数
-        combined_score = VECTOR_WEIGHT * vector_score + KEYWORD_WEIGHT * keyword_score
-
-        scored_results.append(
+        raw_candidates.append(
             {
                 "chunk_id": r.chunk_id,
                 "doc_id": r.doc_id,
@@ -235,13 +187,18 @@ def search_similar(query: str, top_k: int = 5, project_id: str | None = None) ->
                 "page": r.page,
                 "location": r.location,
                 "vector_score": vector_score,
-                "keyword_score": keyword_score,
-                "score": combined_score,
             }
         )
 
-    # 按混合分数排序，返回 top_k
-    scored_results.sort(key=lambda x: x["score"], reverse=True)
+    # 使用通用评分排序
+    scored_results = rank_candidates(
+        raw_candidates,
+        query,
+        vector_weight=VECTOR_WEIGHT,
+        keyword_weight=KEYWORD_WEIGHT,
+        score_key="vector_score",
+        text_key="text",
+    )
 
     return scored_results[:top_k]
 

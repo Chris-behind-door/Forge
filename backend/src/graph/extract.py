@@ -15,6 +15,7 @@ from typing import Any
 
 from ..llm.client import call_llm
 from ..rag.embeddings import embed_texts
+from ..rag.scoring import rank_candidates, cosine_to_score
 from . import queries as gq
 
 logger = logging.getLogger(__name__)
@@ -154,23 +155,37 @@ async def find_and_create_links(
         except Exception as e:
             logger.warning("Failed to update embedding for %s: %s", new_id, e)
 
-        # Vector search for similar resolutions
+        # Vector search for similar resolutions (exclude own meeting)
         try:
             candidates = await gq.search_similar_resolutions(
-                project_id, embedding, top_k=5
+                project_id, embedding, top_k=10
             )
+            logger.info("[DEBUG] Resolution %s: vector search returned %d candidates", new_id, len(candidates))
         except Exception as e:
             logger.warning("Vector search failed for %s: %s", new_id, e)
             continue
 
-        # Filter: skip low-similarity candidates (cosine < 0.5)
-        candidates = [c for c in candidates if c.get("score", 0) >= 0.5]
+        # Exclude own meeting
+        candidates = [c for c in candidates if c.get('meeting_id') != meeting_id]
         if not candidates:
             continue
 
-        # Build context for LLM
+        # Hybrid scoring (vector + keyword)
+        scored = rank_candidates(
+            candidates, content,
+            vector_weight=0.7, keyword_weight=0.3,
+            score_key="score", text_key="content",
+        )
+
+        # Filter: keep candidates with score >= 0.3
+        scored = [c for c in scored if c.get("score", 0) >= 0.3]
+        if not scored:
+            continue
+
+        # Build context for LLM (use top 5)
+        top_candidates = scored[:5]
         existing_list = ""
-        for i, c in enumerate(candidates, 1):
+        for i, c in enumerate(top_candidates, 1):
             existing_list += f"{i}. [ID: {c['id']}] {c['content']}\n"
 
         messages = [
@@ -195,8 +210,8 @@ async def find_and_create_links(
             existing_id = rel.get("existing_id", "")
             reason = rel.get("reason", "")
 
-            # Verify existing_id is in candidates (safety check)
-            if not any(c["id"] == existing_id for c in candidates):
+            # Verify existing_id is in top_candidates (safety check)
+            if not any(c["id"] == existing_id for c in top_candidates):
                 logger.warning("LLM returned unknown existing_id %s, skipping", existing_id)
                 continue
 
