@@ -85,12 +85,16 @@ async def delete_resolution(res_id: str) -> None:
     # Also delete all relation edges connected to this resolution
     for rel_type in ("SUPERSEDES", "AMENDS", "SUPPLEMENTS"):
         await exec_query(
-            f"MATCH (a:Resolution)-[e:{rel_type}]-(b:Resolution) "
+            f"MATCH (a:Resolution)-[e:{rel_type}]->(b:Resolution) "
+            "WHERE a.id = $id OR b.id = $id DELETE e",
+        )
+        await exec_query(
+            f"MATCH (a:Resolution)<-[e:{rel_type}]-(b:Resolution) "
             "WHERE a.id = $id OR b.id = $id DELETE e",
             {"id": res_id},
         )
     await exec_query(
-        "MATCH (r:Resolution) WHERE r.id = $id DELETE r",
+        "MATCH (r:Resolution) WHERE r.id = $id DETACH DELETE r",
         {"id": res_id},
     )
 

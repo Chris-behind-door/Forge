@@ -142,6 +142,22 @@ async def delete_meeting(meeting_id: str) -> dict:
         del resolutions[rid]
     _save_resolutions(resolutions)
 
+    # Delete Meeting node and edges in Kùzu
+    await gq.exec_query(
+        "MATCH (m:Meeting)-[e:CONTAINS_RESOLUTION]->(r:Resolution) "
+        "WHERE m.id = $id DELETE e",
+        {"id": meeting_id},
+    )
+    await gq.exec_query(
+        "MATCH (p:Project)-[e:CONTAINS_MEETING]->(m:Meeting) "
+        "WHERE m.id = $id DELETE e",
+        {"id": meeting_id},
+    )
+    await gq.exec_query(
+        "MATCH (m:Meeting) WHERE m.id = $id DELETE m",
+        {"id": meeting_id},
+    )
+
     del meetings[meeting_id]
     _save_meetings(meetings)
 
