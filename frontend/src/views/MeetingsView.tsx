@@ -108,6 +108,9 @@ function MeetingsView() {
   const [editingResolution, setEditingResolution] = useState<Resolution | null>(null)
   const [editForm] = Form.useForm()
 
+  // Re-extract confirmation
+  const [reextractConfirmOpen, setReextractConfirmOpen] = useState(false)
+
   // Highlighted resolution (for jump-to)
   const [highlightedResId, setHighlightedResId] = useState<string | null>(null)
 
@@ -304,8 +307,9 @@ function MeetingsView() {
 
   // -------- AI 提取决议 --------
 
-  const handleExtract = async () => {
+  const handleDoExtract = async () => {
     if (!selectedMeeting) return
+    setReextractConfirmOpen(false)
     setExtractLoading(true)
     try {
       const res = await fetch(`${getApiBase()}/meetings/${selectedMeeting.id}/extract`, {
@@ -313,7 +317,10 @@ function MeetingsView() {
       })
       if (res.ok) {
         const data = await res.json()
-        message.success(data.message || `提取了 ${data.resolutions?.length || 0} 条决议`)
+        const msg = data.cleared > 0
+          ? `已清空 ${data.cleared} 条旧决议，重新提取了 ${data.resolutions?.length || 0} 条决议`
+          : `提取了 ${data.resolutions?.length || 0} 条决议`
+        message.success(msg)
         fetchResolutions(selectedMeeting.id)
       } else {
         const err = await res.json()
@@ -323,6 +330,27 @@ function MeetingsView() {
       message.error('请求失败，请检查网络')
     }
     setExtractLoading(false)
+  }
+
+  // -------- 删除关联 --------
+
+  const handleDeleteRelation = async (
+    fromId: string, toId: string, relationType: string,
+  ) => {
+    try {
+      const params = new URLSearchParams({ from_id: fromId, to_id: toId, relation_type: relationType })
+      const res = await fetch(`${getApiBase()}/resolutions/relations?${params}`, {
+        method: 'DELETE',
+      })
+      if (res.ok) {
+        message.success('关联已删除')
+        if (selectedMeeting) fetchResolutions(selectedMeeting.id)
+      } else {
+        message.error('删除关联失败')
+      }
+    } catch {
+      message.error('删除关联失败')
+    }
   }
 
   // -------- 跳转到关联决议 --------
@@ -486,10 +514,17 @@ function MeetingsView() {
                   </Button>
                   <Button
                     icon={extractLoading ? <LoadingOutlined /> : <RobotOutlined />}
-                    onClick={handleExtract}
+                    onClick={() => {
+                      // Check existing resolutions count and show confirmation
+                      if (resolutions.length > 0) {
+                        setReextractConfirmOpen(true)
+                      } else {
+                        handleDoExtract()
+                      }
+                    }}
                     disabled={extractLoading}
                   >
-                    AI 提取决议
+                    {resolutions.length > 0 ? '重新提取' : 'AI 提取决议'}
                   </Button>
                 </div>
               </div>
@@ -568,17 +603,33 @@ function MeetingsView() {
                               <div
                                 key={idx}
                                 className="relation-item"
-                                onClick={() => handleJumpToResolution(targetId)}
                               >
-                                {isOutgoing
-                                  ? <ArrowRightOutlined className="relation-icon" />
-                                  : <ArrowLeftOutlined className="relation-icon" />
-                                }
-                                <span>
-                                  <span className="relation-direction">{directionLabel}</span>
-                                  <Tag color={relInfo.color} style={{ fontSize: 11, margin: '0 2px' }}>{relInfo.label}</Tag>
-                                  <span className="relation-summary">{summary}</span>
+                                <span
+                                  style={{ cursor: 'pointer', flex: 1 }}
+                                  onClick={() => handleJumpToResolution(targetId)}
+                                >
+                                  {isOutgoing
+                                    ? <ArrowRightOutlined className="relation-icon" />
+                                    : <ArrowLeftOutlined className="relation-icon" />
+                                  }
+                                  <span>
+                                    <span className="relation-direction">{directionLabel}</span>
+                                    <Tag color={relInfo.color} style={{ fontSize: 11, margin: '0 2px' }}>{relInfo.label}</Tag>
+                                    <span className="relation-summary">{summary}</span>
+                                  </span>
                                 </span>
+                                <Tooltip title="删除关联">
+                                  <Button
+                                    type="text"
+                                    size="small"
+                                    danger
+                                    icon={<DeleteOutlined />}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleDeleteRelation(rel.from_id, rel.to_id, rel.relation_type)
+                                    }}
+                                  />
+                                </Tooltip>
                               </div>
                             )
                           })}
@@ -765,6 +816,20 @@ function MeetingsView() {
             </Form>
           </div>
         )}
+      </Modal>
+      {/* 重新提取确认 Modal */}
+      <Modal
+        title="重新提取决议"
+        open={reextractConfirmOpen}
+        onOk={handleDoExtract}
+        onCancel={() => setReextractConfirmOpen(false)}
+        okText="确认重新提取"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+      >
+        <p>
+          该会议已有 <strong>{resolutions.length}</strong> 条决议，重新提取将清空并替换，是否继续？
+        </p>
       </Modal>
     </div>
   )
