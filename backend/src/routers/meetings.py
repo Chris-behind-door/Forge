@@ -332,7 +332,11 @@ async def delete_relation(
     relation_type: str,
 ) -> dict:
     """Delete a specific relation between two resolutions."""
-    await gq.delete_relation(from_id, to_id, relation_type)
+    try:
+        await gq.delete_relation(from_id, to_id, relation_type)
+    except Exception as e:
+        logger.warning("Failed to delete relation %s->%s (%s): %s", from_id, to_id, relation_type, e)
+        raise HTTPException(status_code=404, detail=f"关联不存在或已删除: {from_id} -{relation_type}-> {to_id}")
     return {"status": "deleted"}
 
 
