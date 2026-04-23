@@ -637,8 +637,22 @@ async def _clear_meeting_resolutions(meeting_id: str) -> int:
         del resolutions[rid]
 
     # Reset orphaned superseded resolutions to active
+    # Only reset if no other SUPERSEDES edge still points to them
     for tid in superseded_targets:
-        if tid in resolutions:
+        if tid not in resolutions:
+            continue
+        # Check if any remaining SUPERSEDES edge points to this resolution
+        still_superseded = False
+        try:
+            rows = await gq.exec_query(
+                "MATCH (a:Resolution)-[e:SUPERSEDES]->(b:Resolution) "
+                "WHERE b.id = $id RETURN a.id",
+                {"id": tid},
+            )
+            still_superseded = len(rows) > 0
+        except Exception:
+            pass
+        if not still_superseded:
             resolutions[tid]["status"] = "active"
             try:
                 await gq.update_resolution(tid, status="active")
