@@ -604,14 +604,47 @@ async def import_meeting_with_file(
 
 
 async def _clear_meeting_resolutions(meeting_id: str) -> int:
-    """Clear all resolutions for a meeting from JSON + Kùzu. Returns count deleted."""
+    """Clear all resolutions for a meeting from JSON + Kùzu.
+
+    Also resets any resolutions that were superseded by the deleted ones
+    back to active status (orphaned superseded cleanup).
+    Returns count deleted.
+    """
     resolutions = _load_resolutions()
     res_ids = [
         rid for rid, r in resolutions.items() if r.get("meeting_id") == meeting_id
     ]
+
+    # Find resolutions that were superseded by the ones we're about to delete
+    # and reset them to active
+    superseded_targets: set[str] = set()
+    for rid in res_ids:
+        for rel_type in ("SUPERSEDES", "AMENDS", "SUPPLEMENTS"):
+            try:
+                rows = await gq.exec_query(
+                    f"MATCH (a:Resolution)-[e:{rel_type}]->(b:Resolution) "
+                    "WHERE a.id = $id RETURN b.id",
+                    {"id": rid},
+                )
+                for row in rows:
+                    superseded_targets.add(row[0])
+            except Exception:
+                pass
+
+    # Now delete the resolutions
     for rid in res_ids:
         await gq.delete_resolution(rid)
         del resolutions[rid]
+
+    # Reset orphaned superseded resolutions to active
+    for tid in superseded_targets:
+        if tid in resolutions:
+            resolutions[tid]["status"] = "active"
+            try:
+                await gq.update_resolution(tid, status="active")
+            except Exception:
+                pass
+
     _save_resolutions(resolutions)
     return len(res_ids)
 
