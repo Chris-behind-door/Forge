@@ -445,7 +445,10 @@ def _extract_text_from_file(file_path: Path, suffix: str) -> str:
         except ImportError:
             raise HTTPException(
                 status_code=400,
-                detail="Word 文档解析需要 python-docx 库，请运行: pip install python-docx",
+                detail=(
+                    "Word 文档解析需要 python-docx 库，"
+                    "请运行: pip install python-docx"
+                ),
             )
     else:
         raise HTTPException(status_code=400, detail=f"不支持的文件格式: {suffix}")
@@ -475,7 +478,10 @@ async def import_meeting_with_file(
     if suffix not in _SUPPORTED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"不支持的文件格式: {suffix}，支持: {', '.join(_SUPPORTED_EXTENSIONS)}",
+            detail=(
+                f"不支持的文件格式: {suffix}，"
+                f"支持: {', '.join(_SUPPORTED_EXTENSIONS)}"
+            ),
         )
 
     # Dedup: check if same filename + size was already imported to this project
