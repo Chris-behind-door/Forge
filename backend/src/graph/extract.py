@@ -11,6 +11,7 @@ Flow:
 
 import json
 import logging
+from pathlib import Path
 
 from ..llm.client import call_llm
 from ..rag.embeddings import embed_texts
@@ -144,6 +145,28 @@ async def find_and_create_links(
     """
     confirmed_relations: list[dict] = []
 
+    # Load meeting dates for temporal filtering
+    from ..resolution_store import load_resolutions as _load_res
+    _all_res = _load_res()
+    _meeting_dates: dict[str, str] = {}
+    for r in _all_res.values():
+        mid = r.get("meeting_id", "")
+        if mid and mid not in _meeting_dates:
+            # Store meeting_id -> date mapping from resolution metadata
+            _meeting_dates[mid] = r.get("meeting_date", "")
+    # Also try to load from meetings.json
+    try:
+        _meetings_path = Path.home() / ".engineer_assistant" / "data" / "meetings.json"
+        if _meetings_path.exists():
+            _meetings = json.loads(_meetings_path.read_text(encoding="utf-8"))
+            for mid, m in _meetings.items():
+                if mid not in _meeting_dates or not _meeting_dates[mid]:
+                    _meeting_dates[mid] = m.get("date", "")
+    except Exception:
+        pass
+
+    current_meeting_date = _meeting_dates.get(meeting_id, "")
+
     # Phase 1: compute per-resolution candidates (isolated pools)
     res_candidates: list[tuple[dict, list[dict]]] = []
     for new_res in new_resolutions:
@@ -174,6 +197,14 @@ async def find_and_create_links(
 
         # Exclude own meeting
         candidates = [c for c in candidates if c.get("meeting_id") != meeting_id]
+
+        # Temporal filter: only keep candidates from earlier or same-date meetings
+        if current_meeting_date:
+            candidates = [
+                c for c in candidates
+                if _meeting_dates.get(c.get("meeting_id", ""), "") <= current_meeting_date
+            ]
+
         if not candidates:
             continue
 
