@@ -141,7 +141,7 @@ async def _call_llm_json(messages: list[dict]) -> dict:
 # --------------- Main API ---------------
 
 
-async def extract_resolutions(raw_text: str, meeting_date: str) -> list[dict]:
+async def extract_resolutions(raw_text: str, _meeting_date: str = "") -> list[dict]:
     """
     Step 1: Extract structured resolutions from meeting notes via LLM.
 
@@ -178,7 +178,8 @@ async def find_and_create_links(
     Split candidates into PAST (date <= current) and FUTURE (date > current).
 
     Phase 2a (past): Ask LLM if new resolution supersedes/amends/supplements older ones.
-    Phase 2b (future): Ask LLM if newer resolutions supersedes/amends/supplements the current one.
+    Phase 2b (future): Ask LLM if newer resolutions
+    supersedes/amends/supplements the current one.
 
     Returns list of confirmed relations.
     """
@@ -275,7 +276,7 @@ def _load_meeting_dates() -> dict[str, str]:
             for mid, m in meetings.items():
                 meeting_dates[mid] = m.get("date", "")
     except Exception:
-        pass
+        logger.debug("Failed to load meeting dates from file")
     return meeting_dates
 
 
@@ -301,9 +302,13 @@ async def _batch_link(
         groups_text_parts: list[str] = []
         for new_res, top_candidates in batch:
             if direction == "forward":
-                group_str = f"### 当前决议 [ID: {new_res['id']}]\n{new_res['content']}\n\n候选已有决议（来自更早的会议）：\n"
+                label = "候选已有决议（来自更早的会议）："
             else:
-                group_str = f"### 当前决议 [ID: {new_res['id']}]\n{new_res['content']}\n\n候选决议（来自更晚的会议）：\n"
+                label = "候选决议（来自更晚的会议）："
+            group_str = (
+                f"### 当前决议 [ID: {new_res['id']}]"
+                f"\n{new_res['content']}\n\n{label}\n"
+            )
             for j, c in enumerate(top_candidates, 1):
                 group_str += f"{j}. [ID: {c['id']}] {c['content']}\n"
             groups_text_parts.append(group_str)
@@ -311,7 +316,10 @@ async def _batch_link(
         groups_text = "\n---\n\n".join(groups_text_parts)
 
         messages = [
-            {"role": "system", "content": "你是工程决议关联分析助手，输出严格的JSON格式。"},
+            {"role": "system", "content": (
+                "你是工程决议关联分析助手，"
+                "输出严格的JSON格式。"
+            )},
             {"role": "user", "content": prompt.format(groups_text=groups_text)},
         ]
 

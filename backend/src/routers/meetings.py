@@ -335,8 +335,17 @@ async def delete_relation(
     try:
         await gq.delete_relation(from_id, to_id, relation_type)
     except Exception as e:
-        logger.warning("Failed to delete relation %s->%s (%s): %s", from_id, to_id, relation_type, e)
-        raise HTTPException(status_code=404, detail=f"关联不存在或已删除: {from_id} -{relation_type}-> {to_id}")
+        logger.warning(
+            "Failed to delete relation %s->%s (%s): %s",
+            from_id, to_id, relation_type, e,
+        )
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"关联不存在或已删除: "
+                f"{from_id} -{relation_type}-> {to_id}"
+            ),
+        ) from None
     return {"status": "deleted"}
 
 
@@ -599,7 +608,10 @@ async def import_meeting_with_file(
         "meeting": meeting.model_dump(),
         "resolutions": resolutions_data,
         "relations": relations,
-        "message": f"提取了 {len(resolutions_data)} 条决议，建立了 {len(relations)} 条关联",
+        "message": (
+            f"提取了 {len(resolutions_data)} 条决议，"
+            f"建立了 {len(relations)} 条关联"
+        ),
     }
 
 
@@ -629,9 +641,9 @@ async def _clear_meeting_resolutions(meeting_id: str) -> int:
                 for row in rows:
                     superseded_targets.add(row[0])
             except Exception:
-                pass
-
-    # Now delete the resolutions
+                logger.debug(
+                    "Edge query failed for %s/%s", rid, rel_type
+                )
     for rid in res_ids:
         await gq.delete_resolution(rid)
         del resolutions[rid]
@@ -651,13 +663,15 @@ async def _clear_meeting_resolutions(meeting_id: str) -> int:
             )
             still_superseded = len(rows) > 0
         except Exception:
-            pass
+            logger.debug("SUPERSEDES check failed for %s", tid)
         if not still_superseded:
             resolutions[tid]["status"] = "active"
             try:
                 await gq.update_resolution(tid, status="active")
             except Exception:
-                pass
+                logger.debug(
+                    "Status update failed for %s", tid
+                )
 
     _save_resolutions(resolutions)
     return len(res_ids)
