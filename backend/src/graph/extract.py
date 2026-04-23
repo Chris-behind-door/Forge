@@ -49,12 +49,14 @@ EXTRACT_PROMPT = """\
 ---"""
 
 BATCH_LINK_PROMPT = """\
-你是一个专业的工程决议关联分析助手。请逐一判断每组中"新决议"与"候选已有决议"之间是否存在关联。
+你是一个专业的工程决议关联分析助手。请逐一判断每组中"当前决议"与"候选已有决议"之间是否存在关联。
+
+当前决议来自最近的会议，候选已有决议来自**更早**的会议。
 
 ## 关联类型
-- SUPERSEDES（替代）：新决议完全替代旧决议，旧决议不再有效
-- AMENDS（修改）：新决议在旧决议基础上做了部分修改
-- SUPPLEMENTS（补充）：新决议对旧决议进行补充说明
+- SUPERSEDES（替代）：当前决议完全替代候选决议，候选决议不再有效
+- AMENDS（修改）：当前决议在候选决议基础上做了部分修改
+- SUPPLEMENTS（补充）：当前决议对候选决议进行补充说明
 - NONE：无直接关联
 
 ## 判断标准
@@ -66,10 +68,46 @@ BATCH_LINK_PROMPT = """\
 {{
   "groups": [
     {{
-      "new_id": "新决议ID",
+      "new_id": "当前决议ID",
       "relations": [
         {{
-          "existing_id": "已有决议ID",
+          "existing_id": "候选决议ID",
+          "type": "SUPERSEDES | AMENDS | SUPPLEMENTS | NONE",
+          "reason": "判断依据（简短）"
+        }}
+      ]
+    }}
+  ]
+}}
+
+## 待判断的决议组：
+
+{groups_text}"""
+
+REVERSE_LINK_PROMPT = """\
+你是一个专业的工程决议关联分析助手。请逐一判断每组中"候选决议"是否替代、修改或补充了"当前决议"。
+
+当前决议来自较早的会议，候选决议来自**更晚**的会议。请判断候选决议是否对当前决议产生了影响。
+
+## 关联类型
+- SUPERSEDES（替代）：候选决议完全替代了当前决议，当前决议不再有效
+- AMENDS（修改）：候选决议在当前决议基础上做了部分修改
+- SUPPLEMENTS（补充）：候选决议对当前决议进行补充说明
+- NONE：无直接关联
+
+## 判断标准
+- 两决议必须有实质性语义关联，不能仅因为关键词相似就建关联
+- 同一主题的不同独立决定 → NONE
+
+## 输出格式
+严格的 JSON（不要包含其他文字）：
+{{
+  "groups": [
+    {{
+      "current_id": "当前决议ID",
+      "relations": [
+        {{
+          "candidate_id": "候选决议ID",
           "type": "SUPERSEDES | AMENDS | SUPPLEMENTS | NONE",
           "reason": "判断依据（简短）"
         }}
@@ -134,41 +172,26 @@ async def find_and_create_links(
     batch_size: int = 5,
 ) -> list[dict]:
     """
-    Batch-aware cross-meeting resolution linking.
+    Bidirectional cross-meeting resolution linking with temporal awareness.
 
-    For each new resolution, find similar existing ones via embedding search.
-    Then batch LLM calls (batch_size per call) with isolated candidate pools
-    using BATCH_LINK_PROMPT.
+    Phase 1: For each new resolution, find similar existing ones via embedding search.
+    Split candidates into PAST (date <= current) and FUTURE (date > current).
 
-    Returns list of dicts with keys: new_id, existing_id, type, reason
-    Only returns confirmed relations (type != NONE).
+    Phase 2a (past): Ask LLM if new resolution supersedes/amends/supplements older ones.
+    Phase 2b (future): Ask LLM if newer resolutions supersedes/amends/supplements the current one.
+
+    Returns list of confirmed relations.
     """
     confirmed_relations: list[dict] = []
 
     # Load meeting dates for temporal filtering
-    from ..resolution_store import load_resolutions as _load_res
-    _all_res = _load_res()
-    _meeting_dates: dict[str, str] = {}
-    for r in _all_res.values():
-        mid = r.get("meeting_id", "")
-        if mid and mid not in _meeting_dates:
-            # Store meeting_id -> date mapping from resolution metadata
-            _meeting_dates[mid] = r.get("meeting_date", "")
-    # Also try to load from meetings.json
-    try:
-        _meetings_path = Path.home() / ".engineer_assistant" / "data" / "meetings.json"
-        if _meetings_path.exists():
-            _meetings = json.loads(_meetings_path.read_text(encoding="utf-8"))
-            for mid, m in _meetings.items():
-                if mid not in _meeting_dates or not _meeting_dates[mid]:
-                    _meeting_dates[mid] = m.get("date", "")
-    except Exception:
-        pass
-
+    _meeting_dates = _load_meeting_dates()
     current_meeting_date = _meeting_dates.get(meeting_id, "")
 
-    # Phase 1: compute per-resolution candidates (isolated pools)
-    res_candidates: list[tuple[dict, list[dict]]] = []
+    # Phase 1: compute per-resolution candidates, split by time
+    past_candidates: list[tuple[dict, list[dict]]] = []
+    future_candidates: list[tuple[dict, list[dict]]] = []
+
     for new_res in new_resolutions:
         new_id = new_res["id"]
         content = new_res["content"]
@@ -198,34 +221,77 @@ async def find_and_create_links(
         # Exclude own meeting
         candidates = [c for c in candidates if c.get("meeting_id") != meeting_id]
 
-        # Temporal filter: only keep candidates from earlier or same-date meetings
-        if current_meeting_date:
-            candidates = [
-                c for c in candidates
-                if _meeting_dates.get(c.get("meeting_id", ""), "") <= current_meeting_date
-            ]
+        # Split by temporal direction
+        past = []
+        future = []
+        for c in candidates:
+            c_date = _meeting_dates.get(c.get("meeting_id", ""), "")
+            if not current_meeting_date or not c_date:
+                past.append(c)  # Unknown date, default to past
+            elif c_date <= current_meeting_date:
+                past.append(c)
+            else:
+                future.append(c)
 
-        if not candidates:
-            continue
+        for group, bucket in [(past, past_candidates), (future, future_candidates)]:
+            scored = rank_candidates(
+                group, content,
+                vector_weight=0.7, keyword_weight=0.3,
+                score_key="score", text_key="content",
+            )
+            scored = [c for c in scored if c.get("score", 0) >= 0.3]
+            top = scored[:5]
+            if top:
+                bucket.append((new_res, top))
 
-        # Hybrid scoring
-        scored = rank_candidates(
-            candidates,
-            content,
-            vector_weight=0.7,
-            keyword_weight=0.3,
-            score_key="score",
-            text_key="content",
-        )
-        scored = [c for c in scored if c.get("score", 0) >= 0.3]
-        top_candidates = scored[:5]
-        if top_candidates:
-            res_candidates.append((new_res, top_candidates))
+    # Phase 2a: past candidates (new -> old)
+    past_relations = await _batch_link(
+        past_candidates, meeting_id, batch_size,
+        prompt=BATCH_LINK_PROMPT,
+        direction="forward",
+    )
+    confirmed_relations.extend(past_relations)
 
+    # Phase 2b: future candidates (future -> new)
+    future_relations = await _batch_link(
+        future_candidates, meeting_id, batch_size,
+        prompt=REVERSE_LINK_PROMPT,
+        direction="reverse",
+    )
+    confirmed_relations.extend(future_relations)
+
+    logger.info("Created %d cross-meeting relations (past: %d, future: %d)",
+                len(confirmed_relations), len(past_relations), len(future_relations))
+    return confirmed_relations
+
+
+def _load_meeting_dates() -> dict[str, str]:
+    """Load meeting_id -> date mapping from meetings.json."""
+    meeting_dates: dict[str, str] = {}
+    try:
+        meetings_path = Path.home() / ".engineer_assistant" / "data" / "meetings.json"
+        if meetings_path.exists():
+            meetings = json.loads(meetings_path.read_text(encoding="utf-8"))
+            for mid, m in meetings.items():
+                meeting_dates[mid] = m.get("date", "")
+    except Exception:
+        pass
+    return meeting_dates
+
+
+async def _batch_link(
+    res_candidates: list[tuple[dict, list[dict]]],
+    meeting_id: str,
+    batch_size: int,
+    prompt: str,
+    direction: str,  # "forward" (new->old) or "reverse" (future->new)
+) -> list[dict]:
+    """Batch LLM linking for one temporal direction."""
     if not res_candidates:
-        return confirmed_relations
+        return []
 
-    # Phase 2: batch LLM calls (batch_size groups per call)
+    confirmed: list[dict] = []
+
     from ..resolution_store import load_resolutions, save_resolutions
 
     for batch_start in range(0, len(res_candidates), batch_size):
@@ -234,7 +300,10 @@ async def find_and_create_links(
         # Build groups_text with isolated candidate pools
         groups_text_parts: list[str] = []
         for new_res, top_candidates in batch:
-            group_str = f"### 新决议 [ID: {new_res['id']}]\n{new_res['content']}\n\n候选已有决议：\n"
+            if direction == "forward":
+                group_str = f"### 当前决议 [ID: {new_res['id']}]\n{new_res['content']}\n\n候选已有决议（来自更早的会议）：\n"
+            else:
+                group_str = f"### 当前决议 [ID: {new_res['id']}]\n{new_res['content']}\n\n候选决议（来自更晚的会议）：\n"
             for j, c in enumerate(top_candidates, 1):
                 group_str += f"{j}. [ID: {c['id']}] {c['content']}\n"
             groups_text_parts.append(group_str)
@@ -242,14 +311,8 @@ async def find_and_create_links(
         groups_text = "\n---\n\n".join(groups_text_parts)
 
         messages = [
-            {
-                "role": "system",
-                "content": "你是工程决议关联分析助手，输出严格的JSON格式。",
-            },
-            {
-                "role": "user",
-                "content": BATCH_LINK_PROMPT.format(groups_text=groups_text),
-            },
+            {"role": "system", "content": "你是工程决议关联分析助手，输出严格的JSON格式。"},
+            {"role": "user", "content": prompt.format(groups_text=groups_text)},
         ]
 
         try:
@@ -259,13 +322,15 @@ async def find_and_create_links(
             logger.warning("Batch LLM relation classification failed: %s", e)
             continue
 
-        # Build lookup: new_id -> its top_candidates for verification
         candidate_lookup = {
             new_res["id"]: top_candidates for new_res, top_candidates in batch
         }
 
         for group in groups_result:
-            new_id = group.get("new_id", "")
+            if direction == "forward":
+                new_id = group.get("new_id", "")
+            else:
+                new_id = group.get("current_id", "")
             top_candidates = candidate_lookup.get(new_id, [])
             if not top_candidates:
                 continue
@@ -275,52 +340,49 @@ async def find_and_create_links(
                 if rel_type == "NONE":
                     continue
 
-                existing_id = rel.get("existing_id", "")
+                if direction == "forward":
+                    existing_id = rel.get("existing_id", "")
+                else:
+                    existing_id = rel.get("candidate_id", "")
                 reason = rel.get("reason", "")
 
-                # Verify existing_id is in this group's isolated candidates
                 if not any(c["id"] == existing_id for c in top_candidates):
-                    logger.warning(
-                        "LLM returned unknown existing_id %s, skipping", existing_id
-                    )
+                    logger.warning("LLM returned unknown id %s, skipping", existing_id)
                     continue
+
+                # Determine edge direction
+                if direction == "forward":
+                    from_id, to_id = new_id, existing_id
+                else:
+                    from_id, to_id = existing_id, new_id
 
                 try:
                     await gq.create_relation(
-                        new_id,
-                        existing_id,
-                        rel_type,
+                        from_id, to_id, rel_type,
                         meeting_id=meeting_id,
                         reason=reason,
                         change_summary=reason,
                         supplement_content=reason,
                     )
                 except Exception as e:
-                    logger.error(
-                        "Failed to create relation %s->%s (%s): %s",
-                        new_id,
-                        existing_id,
-                        rel_type,
-                        e,
-                    )
+                    logger.error("Failed to create relation %s->%s (%s): %s",
+                                 from_id, to_id, rel_type, e)
                     continue
 
                 # Update status for SUPERSEDES
                 if rel_type == "SUPERSEDES":
+                    # The superseded resolution is always the 'to_id'
                     resolutions = load_resolutions()
-                    if existing_id in resolutions:
-                        resolutions[existing_id]["status"] = "superseded"
+                    if to_id in resolutions:
+                        resolutions[to_id]["status"] = "superseded"
                         save_resolutions(resolutions)
-                    await gq.update_resolution(existing_id, status="superseded")
+                    await gq.update_resolution(to_id, status="superseded")
 
-                confirmed_relations.append(
-                    {
-                        "new_id": new_id,
-                        "existing_id": existing_id,
-                        "type": rel_type,
-                        "reason": reason,
-                    }
-                )
+                confirmed.append({
+                    "new_id": from_id,
+                    "existing_id": to_id,
+                    "type": rel_type,
+                    "reason": reason,
+                })
 
-    logger.info("Created %d cross-meeting relations", len(confirmed_relations))
-    return confirmed_relations
+    return confirmed
