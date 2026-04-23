@@ -291,7 +291,7 @@ async def delete_resolution_endpoint(resolution_id: str) -> dict:
 # ---- Relations ----
 
 
-@router.post("/resolutions/relations")
+@router.post("/relations")
 async def create_relation(req: RelationCreate) -> dict:
     valid_types = {"SUPERSEDES", "AMENDS", "SUPPLEMENTS"}
     if req.relation_type not in valid_types:
@@ -325,7 +325,7 @@ async def create_relation(req: RelationCreate) -> dict:
     }
 
 
-@router.delete("/resolutions/relations")
+@router.delete("/relations")
 async def delete_relation(
     from_id: str,
     to_id: str,

@@ -339,7 +339,7 @@ function MeetingsView() {
   ) => {
     try {
       const params = new URLSearchParams({ from_id: fromId, to_id: toId, relation_type: relationType })
-      const res = await fetch(`${getApiBase()}/resolutions/relations?${params}`, {
+      const res = await fetch(`${getApiBase()}/relations?${params}`, {
         method: 'DELETE',
       })
       if (res.ok) {
