@@ -64,7 +64,7 @@ PROVIDERS: dict[str, dict[str, str]] = {
     },
     "ollama": {
         "name": "Ollama (本地)",
-        "default_base_url": "http://localhost:11434/v1",
+        "default_base_url": os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
         "default_model": "qwen2.5:7b",
     },
     "custom": {

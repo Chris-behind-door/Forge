@@ -279,13 +279,13 @@ async def find_and_create_links(
 
 def _load_meeting_dates() -> dict[str, str]:
     """Load meeting_id -> date mapping from meetings.json."""
+    from ..services.json_store import load_json
     meeting_dates: dict[str, str] = {}
     try:
         meetings_path = Path.home() / ".engineer_assistant" / "data" / "meetings.json"
-        if meetings_path.exists():
-            meetings = json.loads(meetings_path.read_text(encoding="utf-8"))
-            for mid, m in meetings.items():
-                meeting_dates[mid] = m.get("date", "")
+        meetings = load_json(meetings_path)
+        for mid, m in meetings.items():
+            meeting_dates[mid] = m.get("date", "")
     except Exception:
         logger.debug("Failed to load meeting dates from file")
     return meeting_dates
