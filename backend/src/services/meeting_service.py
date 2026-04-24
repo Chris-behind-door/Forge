@@ -91,25 +91,36 @@ async def delete(meeting_id: str) -> dict:
     if meeting_id not in meetings:
         raise HTTPException(status_code=404, detail="会议不存在")
 
-    # Cascade delete resolutions with orphan-superseded recovery
-    from ..services.resolution_service import clear_for_meeting
-    deleted_count = await clear_for_meeting(meeting_id)
+    meeting_status = meetings[meeting_id].get("status", "active")
 
-    # Delete graph nodes
-    await gq.exec_query(
+    # Handle queued/processing meetings
+    if meeting_status in ("queued", "processing"):
+        from ..services.import_worker import get_import_queue
+        q = get_import_queue()
+        if meeting_status == "processing" and q.current == meeting_id:
+            q.cancel_current()
+        elif meeting_status == "queued":
+            q.remove_from_queue(meeting_id)
+
+    # Cascade delete resolutions with orphan-superseded recovery
+    if meeting_status == "active":
+        from ..services.resolution_service import clear_for_meeting
+        deleted_count = await clear_for_meeting(meeting_id)
+    else:
+        deleted_count = 0
+
+    # Delete graph nodes (ignore errors for non-active meetings)
+    for cypher in [
         "MATCH (m:Meeting)-[e:CONTAINS_RESOLUTION]->(r:Resolution) "
         "WHERE m.id = $id DELETE e",
-        {"id": meeting_id},
-    )
-    await gq.exec_query(
         "MATCH (p:Project)-[e:CONTAINS_MEETING]->(m:Meeting) "
         "WHERE m.id = $id DELETE e",
-        {"id": meeting_id},
-    )
-    await gq.exec_query(
         "MATCH (m:Meeting) WHERE m.id = $id DELETE m",
-        {"id": meeting_id},
-    )
+    ]:
+        try:
+            await gq.exec_query(cypher, {"id": meeting_id})
+        except Exception:
+            logger.debug("Graph cleanup for %s: %s", meeting_id, cypher[:40])
 
     del meetings[meeting_id]
     _save_meetings(meetings)
