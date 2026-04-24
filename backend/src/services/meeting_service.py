@@ -208,7 +208,7 @@ async def _create_meeting_record(
 async def import_meeting(
     project_id: str, date: str, title: str, filename: str, file_content: bytes,
 ) -> dict:
-    """Full import pipeline: validate → dedup → extract → create → resolutions → links."""
+    """Async import: validate → dedup → create queued meeting → enqueue task → return immediately."""
     if not date:
         raise HTTPException(status_code=400, detail="会议日期为必填字段")
 
@@ -216,37 +216,32 @@ async def import_meeting(
     file_size = len(file_content)
     _check_import_duplicate(project_id, title, filename, file_size)
 
-    # Extract text via temp file
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(file_content)
-        tmp_path = Path(tmp.name)
-    try:
-        raw_text = _extract_text_from_file(tmp_path, suffix)
-    finally:
-        tmp_path.unlink(missing_ok=True)
-
-    if not raw_text.strip():
-        raise HTTPException(status_code=400, detail="文件中未提取到有效文本")
-
     meeting_title = title or Path(filename).stem
+
+    # Save file to temp location for later processing
+    tmp_path = Path(tempfile.mktemp(suffix=suffix))
+    tmp_path.write_bytes(file_content)
+
+    # Create meeting record with status=queued
+    from .import_worker import ImportTask, get_import_queue
     meeting = await _create_meeting_record(
-        project_id, meeting_title, date, raw_text, filename, file_size,
+        project_id, meeting_title, date, "", filename, file_size,
+        status="queued",
     )
 
-    # Extract resolutions via LLM
-    extracted = await extract_resolutions(raw_text, date)
-    if not extracted:
-        return {"meeting": meeting.model_dump(), "resolutions": [], "relations": [],
-                "message": "未提取到决议"}
-
-    resolutions_data, relations = await batch_create_and_link(
-        extracted, meeting.id, project_id,
+    # Enqueue
+    task = ImportTask(
+        meeting_id=meeting.id,
+        project_id=project_id,
+        tmp_path=tmp_path,
+        suffix=suffix,
     )
+    get_import_queue().enqueue(task)
+
     return {
-        "meeting": meeting.model_dump(),
-        "resolutions": resolutions_data,
-        "relations": relations,
-        "message": f"提取了 {len(resolutions_data)} 条决议，建立了 {len(relations)} 条关联",
+        "meeting_id": meeting.id,
+        "status": "queued",
+        "message": "已加入处理队列",
     }
 
 

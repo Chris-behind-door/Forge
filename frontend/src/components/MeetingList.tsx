@@ -1,5 +1,5 @@
-import { Timeline, Spin, Empty, Button, Popconfirm } from 'antd'
-import { PlusOutlined, UploadOutlined, DeleteOutlined } from '@ant-design/icons'
+import { Timeline, Spin, Empty, Button, Popconfirm, Tag } from 'antd'
+import { PlusOutlined, UploadOutlined, DeleteOutlined, ClockCircleOutlined, WarningOutlined, RedoOutlined } from '@ant-design/icons'
 
 interface Meeting {
   id: string
@@ -10,6 +10,7 @@ interface Meeting {
   source_doc_id: string | null
   raw_text: string
   created_at: string
+  status?: string
 }
 
 interface Props {
@@ -21,11 +22,25 @@ interface Props {
   onDelete: (id: string) => void
   onNewMeeting: () => void
   onImport: () => void
+  onRetryImport: (id: string) => void
+}
+
+function MeetingStatusBadge({ status }: { status: string }) {
+  switch (status) {
+    case 'processing':
+      return <Tag icon={<Spin size="small" />} color="processing">处理中</Tag>
+    case 'queued':
+      return <Tag icon={<ClockCircleOutlined />} color="default">等待中</Tag>
+    case 'failed':
+      return <Tag icon={<WarningOutlined />} color="error">已失败</Tag>
+    default:
+      return null
+  }
 }
 
 export default function MeetingList({
   meetings, selectedMeetingId, loading, hasProject,
-  onSelect, onDelete, onNewMeeting, onImport,
+  onSelect, onDelete, onNewMeeting, onImport, onRetryImport,
 }: Props) {
   return (
     <>
@@ -44,28 +59,38 @@ export default function MeetingList({
         ) : (
           <Timeline
             className="meeting-timeline"
-            items={meetings.map(mtg => ({
-              color: selectedMeetingId === mtg.id ? 'blue' : 'gray',
-              content: (
-                <div
-                  className={`timeline-item ${selectedMeetingId === mtg.id ? 'active' : ''}`}
-                  onClick={() => onSelect(mtg)}
-                >
-                  <div className="timeline-item-row">
-                    <div>
-                      <div className="timeline-item-date">{mtg.date}</div>
-                      <div className="timeline-item-title">{mtg.title}</div>
+            items={meetings.map(mtg => {
+              const isActive = mtg.status === 'active' || !mtg.status
+              return {
+                color: selectedMeetingId === mtg.id ? 'blue' : 'gray',
+                content: (
+                  <div
+                    className={`timeline-item ${selectedMeetingId === mtg.id ? 'active' : ''} ${!isActive ? 'disabled' : ''}`}
+                    onClick={() => { if (isActive) onSelect(mtg) }}
+                  >
+                    <div className="timeline-item-row">
+                      <div>
+                        <div className="timeline-item-date">{mtg.date}</div>
+                        <div className="timeline-item-title">{mtg.title}</div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} onClick={(e) => e.stopPropagation()}>
+                        {!isActive && <MeetingStatusBadge status={mtg.status!} />}
+                        {mtg.status === 'failed' && (
+                          <Button type="link" size="small" icon={<RedoOutlined />}
+                            onClick={() => onRetryImport(mtg.id)} title="重试导入" />
+                        )}
+                        {isActive && (
+                          <Popconfirm title="确定删除此会议及其所有决议？" onConfirm={() => onDelete(mtg.id)}>
+                            <Button type="text" size="small" danger icon={<DeleteOutlined />}
+                              onClick={(e) => e.stopPropagation()} className="timeline-delete-btn" />
+                          </Popconfirm>
+                        )}
+                      </div>
                     </div>
-                    <span onClick={(e) => e.stopPropagation()}>
-                    <Popconfirm title="确定删除此会议及其所有决议？" onConfirm={() => onDelete(mtg.id)}>
-                      <Button type="text" size="small" danger icon={<DeleteOutlined />}
-                        onClick={(e) => e.stopPropagation()} className="timeline-delete-btn" />
-                    </Popconfirm>
-                    </span>
                   </div>
-                </div>
-              ),
-            }))}
+                ),
+              }
+            })}
           />
         )}
       </Spin>
