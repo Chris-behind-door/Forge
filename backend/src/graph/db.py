@@ -87,14 +87,27 @@ def _init_schema(conn: kuzu.Connection) -> None:
         except Exception:
             logger.debug("DDL skipped (already exists): %s", ddl[:80])
 
-    # Migration: add embedding field if missing (Kùzu doesn't support ALTER TABLE,
-    # but IF NOT EXISTS on CREATE handles fresh DBs)
+    # Migration: add embedding field if missing
     try:
         conn.execute(
             "ALTER TABLE Resolution ADD embedding FLOAT[512] DEFAULT [0.0]*512"
         )
     except Exception:
         logger.debug("Embedding column migration skipped (already exists)")
+
+    # Migration v4: add status/error to Meeting
+    try:
+        conn.execute(
+            "ALTER TABLE Meeting ADD status STRING DEFAULT 'active'"
+        )
+    except Exception:
+        logger.debug("Meeting.status migration skipped")
+    try:
+        conn.execute(
+            "ALTER TABLE Meeting ADD error STRING DEFAULT ''"
+        )
+    except Exception:
+        logger.debug("Meeting.error migration skipped")
 
 
 def _ensure_db() -> None:
