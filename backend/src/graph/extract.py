@@ -236,9 +236,12 @@ async def find_and_create_links(
 
         for group, bucket in [(past, past_candidates), (future, future_candidates)]:
             scored = rank_candidates(
-                group, content,
-                vector_weight=0.7, keyword_weight=0.3,
-                score_key="score", text_key="content",
+                group,
+                content,
+                vector_weight=0.7,
+                keyword_weight=0.3,
+                score_key="score",
+                text_key="content",
             )
             scored = [c for c in scored if c.get("score", 0) >= 0.3]
             top = scored[:5]
@@ -247,7 +250,9 @@ async def find_and_create_links(
 
     # Phase 2a: past candidates (new -> old)
     past_relations = await _batch_link(
-        past_candidates, meeting_id, batch_size,
+        past_candidates,
+        meeting_id,
+        batch_size,
         prompt=BATCH_LINK_PROMPT,
         direction="forward",
     )
@@ -255,14 +260,20 @@ async def find_and_create_links(
 
     # Phase 2b: future candidates (future -> new)
     future_relations = await _batch_link(
-        future_candidates, meeting_id, batch_size,
+        future_candidates,
+        meeting_id,
+        batch_size,
         prompt=REVERSE_LINK_PROMPT,
         direction="reverse",
     )
     confirmed_relations.extend(future_relations)
 
-    logger.info("Created %d cross-meeting relations (past: %d, future: %d)",
-                len(confirmed_relations), len(past_relations), len(future_relations))
+    logger.info(
+        "Created %d cross-meeting relations (past: %d, future: %d)",
+        len(confirmed_relations),
+        len(past_relations),
+        len(future_relations),
+    )
     return confirmed_relations
 
 
@@ -306,8 +317,7 @@ async def _batch_link(
             else:
                 label = "候选决议（来自更晚的会议）："
             group_str = (
-                f"### 当前决议 [ID: {new_res['id']}]"
-                f"\n{new_res['content']}\n\n{label}\n"
+                f"### 当前决议 [ID: {new_res['id']}]\n{new_res['content']}\n\n{label}\n"
             )
             for j, c in enumerate(top_candidates, 1):
                 group_str += f"{j}. [ID: {c['id']}] {c['content']}\n"
@@ -316,10 +326,10 @@ async def _batch_link(
         groups_text = "\n---\n\n".join(groups_text_parts)
 
         messages = [
-            {"role": "system", "content": (
-                "你是工程决议关联分析助手，"
-                "输出严格的JSON格式。"
-            )},
+            {
+                "role": "system",
+                "content": ("你是工程决议关联分析助手，输出严格的JSON格式。"),
+            },
             {"role": "user", "content": prompt.format(groups_text=groups_text)},
         ]
 
@@ -366,15 +376,22 @@ async def _batch_link(
 
                 try:
                     await gq.create_relation(
-                        from_id, to_id, rel_type,
+                        from_id,
+                        to_id,
+                        rel_type,
                         meeting_id=meeting_id,
                         reason=reason,
                         change_summary=reason,
                         supplement_content=reason,
                     )
                 except Exception as e:
-                    logger.error("Failed to create relation %s->%s (%s): %s",
-                                 from_id, to_id, rel_type, e)
+                    logger.error(
+                        "Failed to create relation %s->%s (%s): %s",
+                        from_id,
+                        to_id,
+                        rel_type,
+                        e,
+                    )
                     continue
 
                 # Update status for SUPERSEDES
@@ -386,11 +403,13 @@ async def _batch_link(
                         save_resolutions(resolutions)
                     await gq.update_resolution(to_id, status="superseded")
 
-                confirmed.append({
-                    "new_id": from_id,
-                    "existing_id": to_id,
-                    "type": rel_type,
-                    "reason": reason,
-                })
+                confirmed.append(
+                    {
+                        "new_id": from_id,
+                        "existing_id": to_id,
+                        "type": rel_type,
+                        "reason": reason,
+                    }
+                )
 
     return confirmed

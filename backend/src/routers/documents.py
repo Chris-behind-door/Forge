@@ -158,16 +158,22 @@ async def process_document(
         chunks = await loop.run_in_executor(None, parser_func, stored_path)
 
         elapsed = (datetime.now() - step_start).total_seconds()
-        logger.info(f"[{doc_id[:8]}] 解析完成: {len(chunks)} 个分块, 耗时 {elapsed:.2f}s")
+        logger.info(
+            f"[{doc_id[:8]}] 解析完成: {len(chunks)} 个分块, 耗时 {elapsed:.2f}s"
+        )
 
         # 步骤 2: 向量化存储
         step_start = datetime.now()
         logger.info(f"[{doc_id[:8]}] 开始向量化...")
 
-        chunk_count = await loop.run_in_executor(None, add_chunks, doc_id, chunks, doc.project_id)
+        chunk_count = await loop.run_in_executor(
+            None, add_chunks, doc_id, chunks, doc.project_id
+        )
 
         elapsed = (datetime.now() - step_start).total_seconds()
-        logger.info(f"[{doc_id[:8]}] 向量化完成: {chunk_count} 个向量, 耗时 {elapsed:.2f}s")
+        logger.info(
+            f"[{doc_id[:8]}] 向量化完成: {chunk_count} 个向量, 耗时 {elapsed:.2f}s"
+        )
 
         # 更新元数据
         metadata = _load_metadata()  # 重新加载（可能有并发更新）

@@ -13,7 +13,9 @@ from .db import get_conn, get_lock
 logger = logging.getLogger(__name__)
 
 
-def _exec_sync(cypher: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+def _exec_sync(
+    cypher: str, params: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
     conn = get_conn()
     result = conn.execute(cypher, parameters=params or {})
     rows = []
@@ -31,11 +33,18 @@ async def exec_query(cypher: str, params: dict[str, Any] | None = None) -> list[
 
 # ---- Resolution CRUD ----
 
-async def create_resolution(res_id: str, meeting_id: str, project_id: str,
-                            content: str, idx: int, status: str = "active",
-                            source_doc_id: str | None = None,
-                            created_at: str = "",
-                            embedding: list[float] | None = None) -> None:
+
+async def create_resolution(
+    res_id: str,
+    meeting_id: str,
+    project_id: str,
+    content: str,
+    idx: int,
+    status: str = "active",
+    source_doc_id: str | None = None,
+    created_at: str = "",
+    embedding: list[float] | None = None,
+) -> None:
     # Kùzu requires a default for FLOAT[] if we pass null
     emb = embedding if embedding is not None else [0.0] * 512
     await exec_query(
@@ -45,10 +54,17 @@ async def create_resolution(res_id: str, meeting_id: str, project_id: str,
             source_doc_id: $source_doc_id, created_at: $created_at,
             embedding: $embedding
         })""",
-        {"id": res_id, "meeting_id": meeting_id, "project_id": project_id,
-         "content": content, "idx": idx, "status": status,
-         "source_doc_id": source_doc_id or "", "created_at": created_at,
-         "embedding": emb},
+        {
+            "id": res_id,
+            "meeting_id": meeting_id,
+            "project_id": project_id,
+            "content": content,
+            "idx": idx,
+            "status": status,
+            "source_doc_id": source_doc_id or "",
+            "created_at": created_at,
+            "embedding": emb,
+        },
     )
 
 
@@ -102,10 +118,16 @@ async def delete_resolution(res_id: str) -> None:
 
 # ---- Relations ----
 
-async def create_relation(from_id: str, to_id: str, rel_type: str,
-                          meeting_id: str = "", reason: str = "",
-                          change_summary: str = "",
-                          supplement_content: str = "") -> None:
+
+async def create_relation(
+    from_id: str,
+    to_id: str,
+    rel_type: str,
+    meeting_id: str = "",
+    reason: str = "",
+    change_summary: str = "",
+    supplement_content: str = "",
+) -> None:
     extra_fields = {"meeting_id": meeting_id}
     if rel_type == "SUPERSEDES":
         extra_fields["reason"] = reason
@@ -134,6 +156,7 @@ async def delete_relation(from_id: str, to_id: str, rel_type: str) -> None:
 
 # ---- Chain query ----
 
+
 async def get_resolution_chain(res_id: str) -> list[dict[str, Any]]:
     """Get all resolutions connected to this one via SUPERSEDES/AMENDS/SUPPLEMENTS."""
     chain = []
@@ -145,11 +168,17 @@ async def get_resolution_chain(res_id: str) -> list[dict[str, Any]]:
             {"id": res_id},
         )
         for row in rows:
-            chain.append({
-                "from_id": res_id, "to_id": row[0],
-                "relation_type": rel_type, "direction": "outgoing",
-                "to_content": row[1], "to_meeting_id": row[2], "to_status": row[3],
-            })
+            chain.append(
+                {
+                    "from_id": res_id,
+                    "to_id": row[0],
+                    "relation_type": rel_type,
+                    "direction": "outgoing",
+                    "to_content": row[1],
+                    "to_meeting_id": row[2],
+                    "to_status": row[3],
+                }
+            )
         # Incoming: other -> this resolution
         rows = await exec_query(
             f"MATCH (a:Resolution)-[e:{rel_type}]->(b:Resolution) "
@@ -157,15 +186,22 @@ async def get_resolution_chain(res_id: str) -> list[dict[str, Any]]:
             {"id": res_id},
         )
         for row in rows:
-            chain.append({
-                "from_id": row[0], "to_id": res_id,
-                "relation_type": rel_type, "direction": "incoming",
-                "from_content": row[1], "from_meeting_id": row[2], "from_status": row[3],
-            })
+            chain.append(
+                {
+                    "from_id": row[0],
+                    "to_id": res_id,
+                    "relation_type": rel_type,
+                    "direction": "incoming",
+                    "from_content": row[1],
+                    "from_meeting_id": row[2],
+                    "from_status": row[3],
+                }
+            )
     return chain
 
 
 # ---- Project graph ----
+
 
 async def get_project_graph(project_id: str) -> dict[str, Any]:
     """Get all resolutions and edges for a project."""
@@ -185,13 +221,16 @@ async def get_project_graph(project_id: str) -> dict[str, Any]:
         for row in rows:
             edges.append({"from": row[0], "to": row[1], "type": rel_type})
     return {
-        "nodes": [{"id": n[0], "content": n[1], "meeting_id": n[2], "status": n[3]}
-                  for n in nodes],
+        "nodes": [
+            {"id": n[0], "content": n[1], "meeting_id": n[2], "status": n[3]}
+            for n in nodes
+        ],
         "edges": edges,
     }
 
 
 # ---- Project/Meeting containment ----
+
 
 async def add_project_meeting(project_id: str, meeting_id: str) -> None:
     await exec_query(
@@ -214,10 +253,16 @@ async def search_similar_resolutions(
     )
     results = []
     for row in rows:
-        results.append({
-            "id": row[0], "content": row[1], "meeting_id": row[2],
-            "status": row[3], "index": row[4], "score": row[5],
-        })
+        results.append(
+            {
+                "id": row[0],
+                "content": row[1],
+                "meeting_id": row[2],
+                "status": row[3],
+                "index": row[4],
+                "score": row[5],
+            }
+        )
     return results
 
 

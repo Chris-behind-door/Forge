@@ -38,8 +38,12 @@ def _load_projects() -> dict[str, Project]:
 def _save_projects(projects: dict[str, Project]) -> None:
     _ensure_dir()
     with open(PROJECTS_FILE, "w", encoding="utf-8") as f:
-        json.dump({k: v.model_dump() for k, v in projects.items()}, f,
-                  indent=2, ensure_ascii=False)
+        json.dump(
+            {k: v.model_dump() for k, v in projects.items()},
+            f,
+            indent=2,
+            ensure_ascii=False,
+        )
 
 
 def _load_json(path: Path) -> dict:
@@ -69,10 +73,15 @@ async def create_project(req: ProjectCreate) -> Project:
 
     # Create node in Kùzu
     from ..graph.queries import exec_query
+
     await exec_query(
         "CREATE (p:Project {id: $id, name: $name, description: $pdesc, created_at: $cat})",
-        {"id": project.id, "name": project.name, "pdesc": project.description,
-         "cat": project.created_at},
+        {
+            "id": project.id,
+            "name": project.name,
+            "pdesc": project.description,
+            "cat": project.created_at,
+        },
     )
     return project
 
@@ -87,13 +96,17 @@ async def get_project(project_id: str) -> ProjectDetail:
     meetings_data = _load_json(MEETINGS_FILE)
     resolutions_data = _load_json(RESOLUTIONS_FILE)
 
-    proj_meetings = [m for m in meetings_data.values() if m.get("project_id") == project_id]
+    proj_meetings = [
+        m for m in meetings_data.values() if m.get("project_id") == project_id
+    ]
     for mtg in proj_meetings:
         mtg["resolution_count"] = sum(
             1 for r in resolutions_data.values() if r.get("meeting_id") == mtg["id"]
         )
 
-    total_res = sum(1 for r in resolutions_data.values() if r.get("project_id") == project_id)
+    total_res = sum(
+        1 for r in resolutions_data.values() if r.get("project_id") == project_id
+    )
 
     return ProjectDetail(
         **proj.model_dump(),
@@ -116,6 +129,7 @@ async def update_project(project_id: str, req: ProjectUpdate) -> Project:
     _save_projects(projects)
 
     from ..graph.queries import exec_query
+
     await exec_query(
         "MATCH (p:Project) WHERE p.id = $id SET p.name = $name, p.description = $pdesc",
         {"id": project_id, "name": proj.name, "pdesc": proj.description},
@@ -132,9 +146,13 @@ async def delete_project(project_id: str) -> dict:
     # Cascade 1: remove meetings and resolutions from JSON
     meetings_data = _load_json(MEETINGS_FILE)
     resolutions_data = _load_json(RESOLUTIONS_FILE)
-    meeting_ids = {mid for mid, m in meetings_data.items() if m.get("project_id") == project_id}
+    meeting_ids = {
+        mid for mid, m in meetings_data.items() if m.get("project_id") == project_id
+    }
     for mid in meeting_ids:
-        resolutions_data = {rid: r for rid, r in resolutions_data.items() if r.get("meeting_id") != mid}
+        resolutions_data = {
+            rid: r for rid, r in resolutions_data.items() if r.get("meeting_id") != mid
+        }
         del meetings_data[mid]
     _ensure_dir()
     with open(MEETINGS_FILE, "w", encoding="utf-8") as f:
@@ -145,8 +163,13 @@ async def delete_project(project_id: str) -> dict:
     # Cascade 2: delete all documents in this project
     from ..routers.documents import _load_metadata, _cancel_processing, _save_metadata
     from ..rag.vector_store import delete_doc_chunks
+
     metadata = _load_metadata()
-    doc_ids_to_delete = [did for did, doc in metadata.items() if getattr(doc, 'project_id', None) == project_id]
+    doc_ids_to_delete = [
+        did
+        for did, doc in metadata.items()
+        if getattr(doc, "project_id", None) == project_id
+    ]
     for doc_id in doc_ids_to_delete:
         doc = metadata[doc_id]
         _cancel_processing(doc_id)
@@ -161,4 +184,8 @@ async def delete_project(project_id: str) -> dict:
     _save_projects(projects)
 
     # Note: Kùzu doesn't easily cascade-delete; nodes stay until DB reset.
-    return {"status": "deleted", "id": project_id, "documents_deleted": len(doc_ids_to_delete)}
+    return {
+        "status": "deleted",
+        "id": project_id,
+        "documents_deleted": len(doc_ids_to_delete),
+    }

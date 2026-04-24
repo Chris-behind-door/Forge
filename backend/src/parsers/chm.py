@@ -411,7 +411,10 @@ def parse_chm(
 
         logger.info(
             "%s: %d docs, %d sections, %d chunks",
-            chm_p.name, len(subdirs), len(sections), len(result),
+            chm_p.name,
+            len(subdirs),
+            len(sections),
+            len(result),
         )
         return result
 

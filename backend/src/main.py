@@ -137,6 +137,7 @@ async def query(request: QueryRequest) -> QueryResponse:
     # Save user message early so it persists even if the agent fails
     if request.session_id:
         from .models.session import save_message
+
         save_message(request.session_id, "user", request.question)
 
     # Agent 流程
@@ -151,15 +152,19 @@ async def query(request: QueryRequest) -> QueryResponse:
     except ValueError as e:
         if request.session_id:
             from .models.session import save_message as _save
+
             _save(request.session_id, "assistant", f"[错误] {e}")
         from fastapi import HTTPException
+
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         logger.exception("Agent query failed")
         if request.session_id:
             from .models.session import save_message as _save
+
             _save(request.session_id, "assistant", "[错误] LLM 查询失败")
         from fastapi import HTTPException
+
         raise HTTPException(status_code=500, detail="LLM 查询失败，请稍后重试")
 
     # 用实际检索到的 chunk 元数据构建 citations（而非正则解析回答文本）
@@ -205,7 +210,11 @@ async def query(request: QueryRequest) -> QueryResponse:
 
     # Persist assistant message to session
     if request.session_id:
-        from .models.session import save_message, update_session_title, get_session_title
+        from .models.session import (
+            save_message,
+            update_session_title,
+            get_session_title,
+        )
 
         save_message(
             request.session_id,

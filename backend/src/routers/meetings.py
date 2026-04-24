@@ -337,14 +337,14 @@ async def delete_relation(
     except Exception as e:
         logger.warning(
             "Failed to delete relation %s->%s (%s): %s",
-            from_id, to_id, relation_type, e,
+            from_id,
+            to_id,
+            relation_type,
+            e,
         )
         raise HTTPException(
             status_code=404,
-            detail=(
-                f"关联不存在或已删除: "
-                f"{from_id} -{relation_type}-> {to_id}"
-            ),
+            detail=(f"关联不存在或已删除: {from_id} -{relation_type}-> {to_id}"),
         ) from None
     return {"status": "deleted"}
 
@@ -446,8 +446,7 @@ def _extract_text_from_file(file_path: Path, suffix: str) -> str:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "Word 文档解析需要 python-docx 库，"
-                    "请运行: pip install python-docx"
+                    "Word 文档解析需要 python-docx 库，请运行: pip install python-docx"
                 ),
             )
     else:
@@ -479,8 +478,7 @@ async def import_meeting_with_file(
         raise HTTPException(
             status_code=400,
             detail=(
-                f"不支持的文件格式: {suffix}，"
-                f"支持: {', '.join(_SUPPORTED_EXTENSIONS)}"
+                f"不支持的文件格式: {suffix}，支持: {', '.join(_SUPPORTED_EXTENSIONS)}"
             ),
         )
 
@@ -615,8 +613,7 @@ async def import_meeting_with_file(
         "resolutions": resolutions_data,
         "relations": relations,
         "message": (
-            f"提取了 {len(resolutions_data)} 条决议，"
-            f"建立了 {len(relations)} 条关联"
+            f"提取了 {len(resolutions_data)} 条决议，建立了 {len(relations)} 条关联"
         ),
     }
 
@@ -647,9 +644,7 @@ async def _clear_meeting_resolutions(meeting_id: str) -> int:
                 for row in rows:
                     superseded_targets.add(row[0])
             except Exception:
-                logger.debug(
-                    "Edge query failed for %s/%s", rid, rel_type
-                )
+                logger.debug("Edge query failed for %s/%s", rid, rel_type)
     for rid in res_ids:
         await gq.delete_resolution(rid)
         del resolutions[rid]
@@ -675,9 +670,7 @@ async def _clear_meeting_resolutions(meeting_id: str) -> int:
             try:
                 await gq.update_resolution(tid, status="active")
             except Exception:
-                logger.debug(
-                    "Status update failed for %s", tid
-                )
+                logger.debug("Status update failed for %s", tid)
 
     _save_resolutions(resolutions)
     return len(res_ids)

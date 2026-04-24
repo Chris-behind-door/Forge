@@ -41,7 +41,9 @@ class ChunkRecord(LanceModel):
     text: str = Field(description="分块文本")
     page: int | None = Field(default=None, description="页码（PDF）")
     location: str | None = Field(default=None, description="位置标识（CHM等）")
-    project_id: str | None = Field(default=None, description="所属项目，null 表示通用知识")
+    project_id: str | None = Field(
+        default=None, description="所属项目，null 表示通用知识"
+    )
     vector: Vector(EMBEDDING_DIM) = Field(description="嵌入向量")
 
 
@@ -135,7 +137,9 @@ def delete_doc_chunks(doc_id: str) -> int:
     return count_before - count_after
 
 
-def search_similar(query: str, top_k: int = 5, project_id: str | None = None) -> list[dict[str, Any]]:
+def search_similar(
+    query: str, top_k: int = 5, project_id: str | None = None
+) -> list[dict[str, Any]]:
     """
     混合检索：向量语义 + 关键词匹配
 
@@ -166,7 +170,9 @@ def search_similar(query: str, top_k: int = 5, project_id: str | None = None) ->
     #   不指定 → 只查通用知识
     if project_id is not None:
         safe_pid = project_id.replace("'", "''")
-        search_obj = search_obj.where(f"project_id = '{safe_pid}' OR project_id IS NULL")
+        search_obj = search_obj.where(
+            f"project_id = '{safe_pid}' OR project_id IS NULL"
+        )
     else:
         search_obj = search_obj.where("project_id IS NULL")
     candidates = search_obj.to_pydantic(ChunkRecord)

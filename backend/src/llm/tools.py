@@ -11,7 +11,9 @@ from ..rag.vector_store import search_similar
 logger = logging.getLogger(__name__)
 
 # Context variable for project-scoped search
-_current_project_id: ContextVar[str | None] = ContextVar('_current_project_id', default=None)
+_current_project_id: ContextVar[str | None] = ContextVar(
+    "_current_project_id", default=None
+)
 
 # ============ 工具定义（OpenAI function calling 格式）============
 

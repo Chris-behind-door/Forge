@@ -33,6 +33,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 
 from contextlib import contextmanager
 
+
 @contextmanager
 def _get_conn():
     DB_DIR.mkdir(parents=True, exist_ok=True)
@@ -168,7 +169,9 @@ def get_context_messages(
     while i < len(rows) - 1:
         if rows[i]["role"] == "user" and rows[i + 1]["role"] == "assistant":
             paired.append({"role": rows[i]["role"], "content": rows[i]["content"]})
-            paired.append({"role": rows[i + 1]["role"], "content": rows[i + 1]["content"]})
+            paired.append(
+                {"role": rows[i + 1]["role"], "content": rows[i + 1]["content"]}
+            )
             i += 2
         else:
             # Skip unpaired message and try to recover

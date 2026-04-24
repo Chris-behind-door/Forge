@@ -88,7 +88,9 @@ def _init_schema(conn: kuzu.Connection) -> None:
     # Migration: add embedding field if missing (Kùzu doesn't support ALTER TABLE,
     # but IF NOT EXISTS on CREATE handles fresh DBs)
     try:
-        conn.execute("ALTER TABLE Resolution ADD embedding FLOAT[512] DEFAULT [0.0]*512")
+        conn.execute(
+            "ALTER TABLE Resolution ADD embedding FLOAT[512] DEFAULT [0.0]*512"
+        )
     except Exception:
         logger.debug("Embedding column migration skipped (already exists)")
 
@@ -103,9 +105,7 @@ def _ensure_db() -> None:
         except RuntimeError as e:
             if "lock" in str(e).lower():
                 logger.exception("Kùzu database is locked by another process")
-                raise RuntimeError(
-                    "数据库被其他进程占用，请关闭其他实例后重试"
-                ) from e
+                raise RuntimeError("数据库被其他进程占用，请关闭其他实例后重试") from e
             raise
         _conn = kuzu.Connection(_db)
         _init_schema(_conn)
