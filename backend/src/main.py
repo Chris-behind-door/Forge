@@ -10,7 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .routers.config import router as config_router
-from .routers.documents import router as documents_router, resume_pending_documents
+from .routers.documents import router as documents_router
+from .services.document_service import resume_pending_documents
 from .routers.sessions import router as sessions_router
 from .routers.projects import router as projects_router
 from .routers.meetings import router as meetings_router
@@ -242,7 +243,9 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=None)
+    parser.add_argument("--host", type=str, default=None)
     args = parser.parse_args()
     port = args.port or int(os.environ.get("FORGE_PORT", 8765))
+    host = args.host or os.environ.get("FORGE_HOST", "127.0.0.1")
 
-    uvicorn.run(app, host="127.0.0.1", port=port)
+    uvicorn.run(app, host=host, port=port)
