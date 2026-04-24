@@ -69,11 +69,8 @@ export default function MeetingList({
                     onClick={() => { if (isActive) onSelect(mtg) }}
                   >
                     <div className="timeline-item-row">
-                      <div>
-                        <div className="timeline-item-date">{mtg.date}</div>
-                        <div className="timeline-item-title">{mtg.title}</div>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} onClick={(e) => e.stopPropagation()}>
+                      <span className="timeline-item-date">{mtg.date}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
                         {!isActive && <MeetingStatusBadge status={mtg.status!} />}
                         {mtg.status === 'failed' && (
                           <Button type="link" size="small" icon={<RedoOutlined />}
@@ -85,6 +82,7 @@ export default function MeetingList({
                         </Popconfirm>
                       </div>
                     </div>
+                    <div className="timeline-item-title">{mtg.title}</div>
                   </div>
                 ),
               }
