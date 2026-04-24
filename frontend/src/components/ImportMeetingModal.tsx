@@ -31,10 +31,11 @@ export default function ImportMeetingModal({ open, onClose, projectId, onImporte
       title="导入会议纪要"
       open={open}
       onCancel={handleClose}
-      footer={extractResult ? [
-        <Button key="close" onClick={handleClose}>关闭</Button>,
-      ] : undefined}
+      cancelText="取消"
       okText={importLoading ? '处理中...' : '导入并提取'}
+      footer={extractResult ? [
+        <Button key="close" type="primary" onClick={handleClose}>确定</Button>,
+      ] : undefined}
       onOk={() => importForm.submit()}
       confirmLoading={importLoading}
       okButtonProps={{ disabled: importLoading }}
@@ -87,8 +88,12 @@ export default function ImportMeetingModal({ open, onClose, projectId, onImporte
               const res = await fetch(`${getApiBase()}/projects/${projectId}/meetings/import`, {
                 method: 'POST', body: formData,
               })
-              if (res.ok) { const data = await res.json(); setExtractResult(data); onImported() }
-              else { const err = await res.json(); message.error(err.detail || '导入失败') }
+              if (res.ok) {
+                const data = await res.json()
+                message.success(data.message || '导入成功')
+                onImported()
+                handleClose()
+              } else { const err = await res.json(); message.error(err.detail || '导入失败') }
             } catch { message.error('导入失败') }
             setImportLoading(false)
           }}>
