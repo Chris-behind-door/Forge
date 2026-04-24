@@ -32,3 +32,6 @@ packages = ["src"]
 dev = [
     "ruff>=0.15.6",
 ]
+
+[tool.ruff.lint]
+ignore = ["RUF001", "RUF002", "RUF003", "D104", "D212", "COM812"]
