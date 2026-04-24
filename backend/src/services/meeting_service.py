@@ -12,7 +12,6 @@ from ..graph import queries as gq
 from ..models.meeting import Meeting, MeetingCreate, MeetingUpdate
 from ..services.json_store import load_json, save_json
 from ..services.resolution_service import batch_create_and_link, clear_for_meeting
-from ..graph.extract import extract_resolutions
 
 logger = logging.getLogger(__name__)
 

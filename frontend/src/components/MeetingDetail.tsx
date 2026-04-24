@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import { Card, Button, Modal, Form, Input, Select, Spin, Empty, Collapse, Alert, Tag, message } from 'antd'
 import {
   PlusOutlined, CalendarOutlined, FileTextOutlined,
-  RobotOutlined, LoadingOutlined,
+  RobotOutlined, LoadingOutlined, ClockCircleOutlined, WarningOutlined, RedoOutlined,
 } from '@ant-design/icons'
 import { getApiBase } from '../api'
 import ResolutionCard, { statusConfig, type Resolution, type RelationItem } from './ResolutionCard'
@@ -26,11 +26,12 @@ interface Props {
   onRefreshResolutions: () => void
   onSetExtractLoading: (v: boolean) => void
   onSelectMeeting: (m: Meeting) => void
+  onRetryImport: (id: string) => void
 }
 
 export default function MeetingDetail({
   meeting, meetings, extractLoading,
-  onExtractDone, onRefreshResolutions, onSetExtractLoading, onSelectMeeting,
+  onExtractDone, onRefreshResolutions, onSetExtractLoading, onSelectMeeting, onRetryImport,
 }: Props) {
   const [resolutions, setResolutions] = useState<Resolution[]>([])
   const [relationMap, setRelationMap] = useState<Record<string, RelationItem[]>>({})
@@ -65,11 +66,14 @@ export default function MeetingDetail({
     setDetailLoading(false)
   }, [])
 
+  const meetingStatus = meeting.status || 'active'
+  const isNonActive = meetingStatus !== 'active'
+
   // 当 meeting 变化时加载
   const isFirstRender = useState(true)
   if (isFirstRender[0]) {
     isFirstRender[1](false)
-    fetchResolutions(meeting.id)
+    if (!isNonActive) fetchResolutions(meeting.id)
   }
 
   // -------- Handlers --------
@@ -161,6 +165,44 @@ export default function MeetingDetail({
   }
 
   // -------- Render --------
+
+  if (isNonActive) {
+    return (
+      <Card className="meeting-header-card" size="small">
+        <div className="meeting-header">
+          <div style={{ flex: 1 }}>
+            <h2 className="meeting-title"><CalendarOutlined /> {meeting.title}</h2>
+            <div className="meeting-meta">
+              <Tag color="blue">{meeting.date}</Tag>
+            </div>
+          </div>
+        </div>
+        <div style={{ textAlign: 'center', padding: '48px 0' }}>
+          {meetingStatus === 'queued' && (
+            <>
+              <ClockCircleOutlined style={{ fontSize: 48, color: '#999' }} />
+              <p style={{ marginTop: 16, color: '#666' }}>会议正在排队等待处理...</p>
+            </>
+          )}
+          {meetingStatus === 'processing' && (
+            <>
+              <Spin size="large" />
+              <p style={{ marginTop: 16, color: '#666' }}>正在处理会议纪要，请稍候...</p>
+            </>
+          )}
+          {meetingStatus === 'failed' && (
+            <>
+              <WarningOutlined style={{ fontSize: 48, color: '#ff4d4f' }} />
+              <p style={{ marginTop: 16, color: '#666' }}>会议导入处理失败</p>
+              <Button type="primary" icon={<RedoOutlined />} onClick={() => onRetryImport(meeting.id)} style={{ marginTop: 8 }}>
+                重试导入
+              </Button>
+            </>
+          )}
+        </div>
+      </Card>
+    )
+  }
 
   return (
     <Spin spinning={detailLoading}>
