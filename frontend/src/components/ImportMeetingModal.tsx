@@ -13,6 +13,7 @@ interface Props {
 export default function ImportMeetingModal({ open, onClose, projectId, onImported }: Props) {
   const [importForm] = Form.useForm()
   const [importLoading, setImportLoading] = useState(false)
+  const [hasFile, setHasFile] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
 
   const handleClose = () => {
@@ -22,6 +23,7 @@ export default function ImportMeetingModal({ open, onClose, projectId, onImporte
       abortRef.current = null
     }
     setImportLoading(false)
+    setHasFile(false)
     importForm.resetFields()
     onClose()
   }
@@ -43,7 +45,7 @@ export default function ImportMeetingModal({ open, onClose, projectId, onImporte
       okText={importLoading ? '处理中...' : '导入并提取'}
       onOk={() => importForm.submit()}
       confirmLoading={importLoading}
-      okButtonProps={{ disabled: importLoading }}
+      okButtonProps={{ disabled: importLoading || !hasFile }}
       cancelButtonProps={{ disabled: importLoading }}
       width={720}
     >
@@ -54,13 +56,15 @@ export default function ImportMeetingModal({ open, onClose, projectId, onImporte
         style={{ marginBottom: 16 }}
       />
       <Form form={importForm} layout="vertical" onFinish={async (values) => {
-        if (!projectId || !values.file?.[0] || importLoading) return
+        if (!projectId || importLoading) return
+        const file = values.file?.[0]?.originFileObj
+        if (!file) return
         setImportLoading(true)
         const controller = new AbortController()
         abortRef.current = controller
         try {
           const formData = new FormData()
-          formData.append('file', values.file[0])
+          formData.append('file', file as File)
           formData.append('date', values.date?.format('YYYY-MM-DD') || '')
           formData.append('title', values.title || '')
           const res = await fetch(`${getApiBase()}/projects/${projectId}/meetings/import`, {
@@ -86,7 +90,11 @@ export default function ImportMeetingModal({ open, onClose, projectId, onImporte
           abortRef.current = null
         }
       }}>
-        <Form.Item name="file" label="纪要文件" rules={[{ required: true, message: '请选择文件' }]}>
+        <Form.Item name="file" label="纪要文件" rules={[{ required: true, message: '请选择文件' }]} valuePropName="fileList" getValueFromEvent={(e) => {
+          const fileList = Array.isArray(e) ? e : e?.fileList || []
+          setHasFile(fileList.length > 0)
+          return fileList
+        }}>
           <Upload beforeUpload={() => false} maxCount={1} accept=".pdf,.txt,.md,.doc,.docx">
             <Button icon={<UploadOutlined />}>选择文件</Button>
           </Upload>
