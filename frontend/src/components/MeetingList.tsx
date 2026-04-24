@@ -79,12 +79,10 @@ export default function MeetingList({
                           <Button type="link" size="small" icon={<RedoOutlined />}
                             onClick={() => onRetryImport(mtg.id)} title="重试导入" />
                         )}
-                        {isActive && (
-                          <Popconfirm title="确定删除此会议及其所有决议？" onConfirm={() => onDelete(mtg.id)}>
-                            <Button type="text" size="small" danger icon={<DeleteOutlined />}
-                              onClick={(e) => e.stopPropagation()} className="timeline-delete-btn" />
-                          </Popconfirm>
-                        )}
+                        <Popconfirm title={`确定删除此会议${isActive ? '及其所有决议' : ''}？`} onConfirm={() => onDelete(mtg.id)}>
+                          <Button type="text" size="small" danger icon={<DeleteOutlined />}
+                            onClick={(e) => e.stopPropagation()} className="timeline-delete-btn" />
+                        </Popconfirm>
                       </div>
                     </div>
                   </div>
