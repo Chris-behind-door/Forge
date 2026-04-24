@@ -94,7 +94,7 @@ async def _process_task(task: ImportTask) -> None:
         return _import_queue.is_cancelled()
 
     try:
-        raw_text = _extract_text_from_file(task.tmp_path, task.suffix)
+        raw_text = await asyncio.to_thread(_extract_text_from_file, task.tmp_path, task.suffix)
 
         if not raw_text.strip():
             _set_meeting_status(task.meeting_id, "failed", "文件中未提取到有效文本")
