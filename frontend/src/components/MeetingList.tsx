@@ -46,7 +46,7 @@ export default function MeetingList({
             className="meeting-timeline"
             items={meetings.map(mtg => ({
               color: selectedMeetingId === mtg.id ? 'blue' : 'gray',
-              children: (
+              content: (
                 <div
                   className={`timeline-item ${selectedMeetingId === mtg.id ? 'active' : ''}`}
                   onClick={() => onSelect(mtg)}
