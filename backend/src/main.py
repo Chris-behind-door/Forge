@@ -106,6 +106,23 @@ async def on_startup():
     logger.info("检查未完成的文档...")
     await resume_pending_documents()
 
+    # Recover stale import tasks: processing/queued → failed
+    from .services.meeting_service import _load_meetings, _save_meetings
+    meetings = _load_meetings()
+    recovered = 0
+    for mid, m in meetings.items():
+        if m.get("status") == "processing":
+            m["status"] = "failed"
+            m["error"] = "服务重启导致处理中断，请重试"
+            recovered += 1
+        elif m.get("status") == "queued":
+            m["status"] = "failed"
+            m["error"] = "服务重启导致排队丢失，请重试"
+            recovered += 1
+    if recovered:
+        _save_meetings(meetings)
+        logger.info("恢复了 %d 个未完成的导入任务（标记为 failed）", recovered)
+
 
 @app.get("/health")
 async def health() -> dict:

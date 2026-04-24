@@ -23,6 +23,7 @@ interface Meeting {
   raw_text: string
   created_at: string
   status?: string
+  error?: string
 }
 
 function MeetingsView() {
@@ -40,13 +41,15 @@ function MeetingsView() {
   // Import modal
   const [importOpen, setImportOpen] = useState(false)
 
-  // Polling
+  // Polling — use ref to avoid dependency issues
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const projectRef = useRef<string | null>(null)
+  projectRef.current = selectedProjectId
 
   // -------- Data --------
 
-  const fetchMeetings = useCallback(async (projectId: string) => {
-    setMeetingsLoading(true)
+  const fetchMeetings = useCallback(async (projectId: string, silent: boolean = false) => {
+    if (!silent) setMeetingsLoading(true)
     try {
       const res = await fetch(`${getApiBase()}/projects/${projectId}/meetings`)
       if (res.ok) {
@@ -54,7 +57,7 @@ function MeetingsView() {
         setMeetings(data.sort((a: Meeting, b: Meeting) => a.date.localeCompare(b.date)))
       }
     } catch { /* ignore */ }
-    setMeetingsLoading(false)
+    if (!silent) setMeetingsLoading(false)
   }, [])
 
   useEffect(() => {
@@ -69,39 +72,34 @@ function MeetingsView() {
 
   // -------- Polling for import status --------
 
-  const hasNonActive = meetings.some(m => m.status && m.status !== 'active')
-
-  useEffect(() => {
-    // Stop polling if no non-active meetings
-    if (!selectedProjectId || !hasNonActive) {
-      if (pollRef.current) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
-      }
-      return
-    }
-
-    // Start polling
+  const startPolling = useCallback(() => {
     if (pollRef.current) return // already polling
 
     const poll = async () => {
+      const pid = projectRef.current
+      if (!pid) return
       try {
-        const res = await fetch(`${getApiBase()}/projects/${selectedProjectId}/meetings/import-status`)
+        const res = await fetch(`${getApiBase()}/projects/${pid}/meetings/import-status`)
         if (res.ok) {
           const data = await res.json()
-          const { processing, queued, failed } = data
-          // If there are items in any queue, refresh the full list
-          if (processing || (queued && queued.length > 0) || (failed && failed.length > 0)) {
-            // Refresh meetings to get updated statuses
-            const mtgRes = await fetch(`${getApiBase()}/projects/${selectedProjectId}/meetings`)
-            if (mtgRes.ok) {
-              const mtgData = await mtgRes.json()
-              const sorted = mtgData.sort((a: Meeting, b: Meeting) => a.date.localeCompare(b.date))
-              setMeetings(sorted)
-              // Update selected meeting if its status changed
-              if (selectedMeeting) {
-                const updated = sorted.find((m: Meeting) => m.id === selectedMeeting.id)
-                if (updated) setSelectedMeeting(updated)
+          const hasAny = data.processing || (data.queued && data.queued.length > 0) || (data.failed && data.failed.length > 0)
+          // Always refresh to pick up status changes
+          const mtgRes = await fetch(`${getApiBase()}/projects/${pid}/meetings`)
+          if (mtgRes.ok) {
+            const mtgData = await mtgRes.json()
+            const sorted = mtgData.sort((a: Meeting, b: Meeting) => a.date.localeCompare(b.date))
+            setMeetings(sorted)
+            // Update selected meeting
+            setSelectedMeeting(prev => {
+              if (!prev) return prev
+              const updated = sorted.find((m: Meeting) => m.id === prev.id)
+              return updated || prev
+            })
+            // If all active, stop polling
+            if (!hasAny) {
+              if (pollRef.current) {
+                clearInterval(pollRef.current)
+                pollRef.current = null
               }
             }
           }
@@ -109,14 +107,30 @@ function MeetingsView() {
       } catch { /* ignore */ }
     }
 
-    pollRef.current = setInterval(poll, 3000)
-    return () => {
-      if (pollRef.current) {
-        clearInterval(pollRef.current)
-        pollRef.current = null
-      }
+    // Poll immediately, then every 2 seconds
+    poll()
+    pollRef.current = setInterval(poll, 2000)
+  }, [])
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current)
+      pollRef.current = null
     }
-  }, [selectedProjectId, hasNonActive, selectedMeeting])
+  }, [])
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => { stopPolling() }
+  }, [stopPolling])
+
+  // Auto-detect non-active meetings and start/stop polling
+  useEffect(() => {
+    const hasNonActive = meetings.some(m => m.status && m.status !== 'active')
+    if (hasNonActive) {
+      startPolling()
+    }
+  }, [meetings, startPolling])
 
   // -------- Handlers --------
 
@@ -141,6 +155,7 @@ function MeetingsView() {
       if (res.ok) {
         message.success('已重新加入处理队列')
         if (selectedProjectId) fetchMeetings(selectedProjectId)
+        startPolling()
       } else {
         const err = await res.json()
         message.error(err.detail || '重试失败')
@@ -164,6 +179,14 @@ function MeetingsView() {
       if (res.ok) { message.success('会议已创建'); setNewMeetingOpen(false); meetingForm.resetFields(); fetchMeetings(selectedProjectId) }
     } catch { /* validation */ }
   }
+
+  const handleImported = useCallback(() => {
+    // Refresh silently (no global loading spinner) and start polling
+    if (selectedProjectId) {
+      fetchMeetings(selectedProjectId, true)
+      startPolling()
+    }
+  }, [selectedProjectId, fetchMeetings, startPolling])
 
   return (
     <div className="meetings-view">
@@ -223,7 +246,7 @@ function MeetingsView() {
           open={importOpen}
           onClose={() => setImportOpen(false)}
           projectId={selectedProjectId}
-          onImported={() => fetchMeetings(selectedProjectId)}
+          onImported={handleImported}
         />
       )}
     </div>
