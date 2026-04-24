@@ -28,6 +28,8 @@ class Meeting(BaseModel):
     summary: str = ""
     source_doc_id: str | None = None
     raw_text: str = ""
+    status: str = "active"  # active | processing | queued | failed
+    error: str | None = None
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 

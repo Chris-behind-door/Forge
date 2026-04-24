@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState } from 'react'
 import { Modal, Form, Input, DatePicker, Upload, Button, Alert, message } from 'antd'
 import { UploadOutlined } from '@ant-design/icons'
 import { getApiBase } from '../api'
@@ -14,14 +14,8 @@ export default function ImportMeetingModal({ open, onClose, projectId, onImporte
   const [importForm] = Form.useForm()
   const [importLoading, setImportLoading] = useState(false)
   const [hasFile, setHasFile] = useState(false)
-  const abortRef = useRef<AbortController | null>(null)
 
   const handleClose = () => {
-    // Cancel in-flight request if user closes during import
-    if (abortRef.current) {
-      abortRef.current.abort()
-      abortRef.current = null
-    }
     setImportLoading(false)
     setHasFile(false)
     importForm.resetFields()
@@ -42,7 +36,7 @@ export default function ImportMeetingModal({ open, onClose, projectId, onImporte
       maskClosable={!importLoading}
       closable={!importLoading}
       cancelText="取消"
-      okText={importLoading ? '处理中...' : '导入并提取'}
+      okText={importLoading ? '上传中...' : '导入并提取'}
       onOk={() => importForm.submit()}
       confirmLoading={importLoading}
       okButtonProps={{ disabled: importLoading || !hasFile }}
@@ -51,8 +45,8 @@ export default function ImportMeetingModal({ open, onClose, projectId, onImporte
     >
       <Alert
         type="info" showIcon
-        message="上传文件后将自动提取决议并建立跨会议关联"
-        description="处理可能需要几分钟，请耐心等待。导入过程中请勿关闭窗口。"
+        message="上传文件后将自动加入处理队列"
+        description="文件上传后会排队等待 AI 处理，您可以在会议列表中查看处理进度。"
         style={{ marginBottom: 16 }}
       />
       <Form form={importForm} layout="vertical" onFinish={async (values) => {
@@ -60,8 +54,6 @@ export default function ImportMeetingModal({ open, onClose, projectId, onImporte
         const file = values.file?.[0]?.originFileObj
         if (!file) return
         setImportLoading(true)
-        const controller = new AbortController()
-        abortRef.current = controller
         try {
           const formData = new FormData()
           formData.append('file', file as File)
@@ -70,24 +62,20 @@ export default function ImportMeetingModal({ open, onClose, projectId, onImporte
           const res = await fetch(`${getApiBase()}/projects/${projectId}/meetings/import`, {
             method: 'POST',
             body: formData,
-            signal: controller.signal,
           })
           if (res.ok) {
             const data = await res.json()
-            message.success(data.message || '导入成功')
+            message.success(data.message || '已加入处理队列')
             onImported()
             handleClose()
           } else {
             const err = await res.json()
             message.error(err.detail || '导入失败')
           }
-        } catch (e: any) {
-          if (e.name !== 'AbortError') {
-            message.error('导入失败')
-          }
+        } catch {
+          message.error('导入失败')
         } finally {
           setImportLoading(false)
-          abortRef.current = null
         }
       }}>
         <Form.Item name="file" label="纪要文件" rules={[{ required: true, message: '请选择文件' }]} valuePropName="fileList" getValueFromEvent={(e) => {
