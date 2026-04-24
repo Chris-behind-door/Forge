@@ -2,8 +2,9 @@
  * MeetingsView - 会议纪要管理界面（主布局）
  *
  * 只负责组装子组件，状态管理在子组件内部。
+ * 包含异步导入队列的轮询机制。
  */
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Select, Modal, Form, Input, DatePicker, message, Empty } from 'antd'
 import { getApiBase } from '../api'
 import { useProjects } from '../hooks/useProjects'
@@ -21,6 +22,7 @@ interface Meeting {
   source_doc_id: string | null
   raw_text: string
   created_at: string
+  status?: string
 }
 
 function MeetingsView() {
@@ -37,6 +39,9 @@ function MeetingsView() {
 
   // Import modal
   const [importOpen, setImportOpen] = useState(false)
+
+  // Polling
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // -------- Data --------
 
@@ -62,6 +67,59 @@ function MeetingsView() {
     }
   }, [selectedProjectId, fetchMeetings])
 
+  // -------- Polling for import status --------
+
+  const hasNonActive = meetings.some(m => m.status && m.status !== 'active')
+
+  useEffect(() => {
+    // Stop polling if no non-active meetings
+    if (!selectedProjectId || !hasNonActive) {
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
+      return
+    }
+
+    // Start polling
+    if (pollRef.current) return // already polling
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`${getApiBase()}/projects/${selectedProjectId}/meetings/import-status`)
+        if (res.ok) {
+          const data = await res.json()
+          const { processing, queued, failed } = data
+          // If there are items in any queue, refresh the full list
+          if (processing || (queued && queued.length > 0) || (failed && failed.length > 0)) {
+            // Refresh meetings to get updated statuses
+            const mtgRes = await fetch(`${getApiBase()}/projects/${selectedProjectId}/meetings`)
+            if (mtgRes.ok) {
+              const mtgData = await mtgRes.json()
+              const sorted = mtgData.sort((a: Meeting, b: Meeting) => a.date.localeCompare(b.date))
+              setMeetings(sorted)
+              // Update selected meeting if its status changed
+              if (selectedMeeting) {
+                const updated = sorted.find((m: Meeting) => m.id === selectedMeeting.id)
+                if (updated) setSelectedMeeting(updated)
+              }
+            }
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    pollRef.current = setInterval(poll, 3000)
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current)
+        pollRef.current = null
+      }
+    }
+  }, [selectedProjectId, hasNonActive, selectedMeeting])
+
+  // -------- Handlers --------
+
   const handleSelectMeeting = useCallback((meeting: Meeting) => {
     setSelectedMeeting(meeting)
   }, [])
@@ -75,6 +133,19 @@ function MeetingsView() {
         if (selectedProjectId) fetchMeetings(selectedProjectId)
       } else message.error('删除失败')
     } catch { message.error('删除失败') }
+  }
+
+  const handleRetryImport = async (meetingId: string) => {
+    try {
+      const res = await fetch(`${getApiBase()}/meetings/${meetingId}/retry-import`, { method: 'POST' })
+      if (res.ok) {
+        message.success('已重新加入处理队列')
+        if (selectedProjectId) fetchMeetings(selectedProjectId)
+      } else {
+        const err = await res.json()
+        message.error(err.detail || '重试失败')
+      }
+    } catch { message.error('重试失败') }
   }
 
   const handleCreateMeeting = async () => {
@@ -109,6 +180,7 @@ function MeetingsView() {
             onSelect={handleSelectMeeting} onDelete={handleDeleteMeeting}
             onNewMeeting={() => setNewMeetingOpen(true)}
             onImport={() => setImportOpen(true)}
+            onRetryImport={handleRetryImport}
           />
         </div>
       </div>
@@ -126,6 +198,7 @@ function MeetingsView() {
             onRefreshResolutions={() => {}}
             onSetExtractLoading={setExtractLoading}
             onSelectMeeting={handleSelectMeeting}
+            onRetryImport={handleRetryImport}
           />
         )}
       </div>

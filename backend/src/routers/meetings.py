@@ -13,6 +13,7 @@ from ..models.meeting import (
 from ..graph import queries as gq
 from ..services import meeting_service as ms
 from ..services import resolution_service as rs
+from ..services.import_worker import get_import_queue, get_import_status, worker_loop
 from ..resolution_store import load_resolutions, save_resolutions
 
 logger = logging.getLogger(__name__)
@@ -178,6 +179,47 @@ async def import_meeting_with_file(
     filename = file.filename or ""
     file_content = await file.read()
     return await ms.import_meeting(project_id, date, title, filename, file_content)
+
+
+@router.get("/projects/{project_id}/meetings/import-status")
+async def get_import_status_endpoint(project_id: str) -> dict:
+    status = get_import_status()
+    # Filter to only this project's items
+    meetings = ms._load_meetings()
+    project_meetings = {mid: m for mid, m in meetings.items() if m.get("project_id") == project_id}
+    queued = [mid for mid in status["queued"] if mid in project_meetings]
+    failed = [mid for mid in status["failed"] if mid in project_meetings]
+    processing = status["processing"] if status["processing"] in project_meetings else None
+    return {"processing": processing, "queued": queued, "failed": failed}
+
+
+@router.post("/meetings/{meeting_id}/retry-import")
+async def retry_import(meeting_id: str) -> dict:
+    meeting = ms.get(meeting_id)
+    if meeting.status != "failed":
+        raise HTTPException(status_code=400, detail="只能重试导入失败的会议")
+    # Re-enqueue with raw_text re-extraction needed
+    from ..services.import_worker import ImportTask, get_import_queue
+    import tempfile
+    suffix = ".txt"
+    import_meta = ms._load_meetings().get(meeting_id, {})
+    fname = import_meta.get("_import_filename", "meeting.txt")
+    from pathlib import Path
+    suffix = Path(fname).suffix.lower() or ".txt"
+    # We need the original file — but it was deleted. Re-queue with raw_text.
+    tmp_path = Path(tempfile.mktemp(suffix=suffix))
+    tmp_path.write_text(meeting.raw_text, encoding="utf-8")
+    task = ImportTask(
+        meeting_id=meeting_id,
+        project_id=meeting.project_id,
+        tmp_path=tmp_path,
+        suffix=suffix,
+    )
+    # Reset status
+    from ..services.import_worker import _set_meeting_status
+    _set_meeting_status(meeting_id, "queued")
+    get_import_queue().enqueue(task)
+    return {"status": "queued", "meeting_id": meeting_id}
 
 
 @router.get("/meetings/{meeting_id}/resolutions/count")

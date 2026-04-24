@@ -179,14 +179,14 @@ def _extract_text_from_file(file_path: Path, suffix: str) -> str:
 
 async def _create_meeting_record(
     project_id: str, title: str, date: str, raw_text: str,
-    filename: str, file_size: int,
+    filename: str, file_size: int, *, status: str = "active",
 ) -> Meeting:
     """Persist a new meeting with import metadata."""
     meeting_id = f"mtg_{uuid4().hex[:8]}"
     now = datetime.now().isoformat()
     meeting = Meeting(
         id=meeting_id, project_id=project_id, title=title, date=date,
-        raw_text=raw_text, created_at=now,
+        raw_text=raw_text, created_at=now, status=status,
     )
     meetings = _load_meetings()
     meeting_data = meeting.model_dump()
@@ -197,9 +197,9 @@ async def _create_meeting_record(
 
     await gq.exec_query(
         "CREATE (m:Meeting {id: $id, project_id: $pid, title: $title, date: $date, "
-        "summary: $summary, source_doc_id: $sdoc, raw_text: $raw, created_at: $cat})",
+        "summary: $summary, source_doc_id: $sdoc, raw_text: $raw, created_at: $cat, status: $status})",
         {"id": meeting_id, "pid": project_id, "title": title, "date": date,
-         "summary": "", "sdoc": "", "raw": raw_text, "cat": now},
+         "summary": "", "sdoc": "", "raw": raw_text, "cat": now, "status": status},
     )
     await gq.add_project_meeting(project_id, meeting_id)
     return meeting
