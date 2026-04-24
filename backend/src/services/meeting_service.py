@@ -229,7 +229,9 @@ async def import_meeting(
     meeting_title = title or Path(filename).stem
 
     # Save file to temp location for later processing
-    tmp_path = Path(tempfile.mktemp(suffix=suffix))
+    staging_dir = Path.home() / ".engineer_assistant" / "data" / "import_staging"
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = staging_dir / f"{meeting_id}{suffix}"
     tmp_path.write_bytes(file_content)
 
     # Create meeting record with status=queued
