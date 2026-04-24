@@ -106,9 +106,46 @@ async def delete(resolution_id: str) -> None:
     data = load_resolutions()
     if resolution_id not in data:
         raise KeyError("决议不存在")
+
+    # Collect superseded targets before deleting
+    superseded_targets: set[str] = set()
+    for rel_type in ("SUPERSEDES", "AMENDS", "SUPPLEMENTS"):
+        try:
+            rows = await gq.exec_query(
+                f"MATCH (a:Resolution)-[e:{rel_type}]->(b:Resolution) "
+                "WHERE a.id = $id RETURN b.id",
+                {"id": resolution_id},
+            )
+            for row in rows:
+                superseded_targets.add(row[0])
+        except Exception:
+            logger.debug("Edge query failed for %s/%s", resolution_id, rel_type)
+
     del data[resolution_id]
     save_resolutions(data)
     await gq.delete_resolution(resolution_id)
+
+    # Reset orphaned superseded
+    for tid in superseded_targets:
+        if tid not in data:
+            continue
+        still_superseded = False
+        try:
+            rows = await gq.exec_query(
+                "MATCH (a:Resolution)-[e:SUPERSEDES]->(b:Resolution) "
+                "WHERE b.id = $id RETURN a.id",
+                {"id": tid},
+            )
+            still_superseded = len(rows) > 0
+        except Exception:
+            logger.debug("SUPERSEDES check failed for %s", tid)
+        if not still_superseded:
+            data[tid]["status"] = "active"
+            save_resolutions(data)
+            try:
+                await gq.update_resolution(tid, status="active")
+            except Exception:
+                logger.debug("Status update failed for %s", tid)
 
 
 # ── import helpers ──

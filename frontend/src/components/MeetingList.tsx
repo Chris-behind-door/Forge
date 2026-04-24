@@ -56,10 +56,12 @@ export default function MeetingList({
                       <div className="timeline-item-date">{mtg.date}</div>
                       <div className="timeline-item-title">{mtg.title}</div>
                     </div>
+                    <span onClick={(e) => e.stopPropagation()}>
                     <Popconfirm title="确定删除此会议及其所有决议？" onConfirm={() => onDelete(mtg.id)}>
                       <Button type="text" size="small" danger icon={<DeleteOutlined />}
                         onClick={(e) => e.stopPropagation()} className="timeline-delete-btn" />
                     </Popconfirm>
+                    </span>
                   </div>
                 </div>
               ),
