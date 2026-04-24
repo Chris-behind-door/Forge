@@ -39,6 +39,8 @@ SCHEMAS = [
         source_doc_id STRING,
         raw_text STRING,
         created_at STRING,
+        status STRING DEFAULT 'active',
+        error STRING DEFAULT '',
         PRIMARY KEY (id)
     )""",
     """CREATE NODE TABLE IF NOT EXISTS Resolution (

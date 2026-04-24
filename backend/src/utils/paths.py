@@ -15,7 +15,7 @@ METADATA_FILE = DATA_DIR / "documents.json"
 
 # Schema version (increment when vector schema changes)
 SCHEMA_VERSION_FILE = DATA_DIR / "schema_version.txt"
-CURRENT_SCHEMA_VERSION = 3  # v3: added project_id field
+CURRENT_SCHEMA_VERSION = 4  # v4: added status/error to Meeting
 
 
 def ensure_dirs() -> None:
