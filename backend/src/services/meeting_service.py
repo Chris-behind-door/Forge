@@ -1,7 +1,6 @@
 """Meeting CRUD, file import, and re-extract logic."""
 
 import logging
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -259,6 +258,7 @@ async def import_meeting(
 
 async def re_extract(meeting_id: str) -> dict:
     """Re-extract resolutions for an existing meeting."""
+    from ..graph.extract import extract_resolutions
     meetings = _load_meetings()
     if meeting_id not in meetings:
         raise HTTPException(status_code=404, detail="会议不存在")

@@ -14,7 +14,8 @@ from .routers.documents import router as documents_router
 from .services.document_service import resume_pending_documents
 from .routers.sessions import router as sessions_router
 from .routers.projects import router as projects_router
-from .routers.meetings import router as meetings_router, worker_loop as _import_worker_loop
+from .routers.meetings import router as meetings_router
+from .services.import_worker import worker_loop as _import_worker_loop
 from .utils.llm_config import get_active_provider
 from .utils.paths import CURRENT_SCHEMA_VERSION, get_schema_version
 
@@ -80,7 +81,7 @@ async def on_startup():
     """应用启动时：检查 schema 版本，恢复未完成的文档处理"""
     # 启动 import worker
     import asyncio
-    asyncio.create_task(_import_worker_loop())
+    _worker_task = asyncio.create_task(_import_worker_loop())  # noqa: RUF006
     logger.info("Import worker task created")
     stored_version = get_schema_version()
     if stored_version < CURRENT_SCHEMA_VERSION:
@@ -110,7 +111,7 @@ async def on_startup():
     from .services.meeting_service import _load_meetings, _save_meetings
     meetings = _load_meetings()
     recovered = 0
-    for mid, m in meetings.items():
+    for m in meetings.values():
         if m.get("status") == "processing":
             m["status"] = "failed"
             m["error"] = "服务重启导致处理中断，请重试"
