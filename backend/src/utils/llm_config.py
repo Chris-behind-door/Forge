@@ -112,7 +112,7 @@ def get_api_key(provider: str) -> str | None:
             if key_val:
                 return key_val
         except Exception:
-            pass
+            logger.debug("keyring get_password failed, falling back to env")
     # fallback: 环境变量
     return os.environ.get(_env_key_name(provider))
 
@@ -130,8 +130,8 @@ def delete_api_key(provider: str) -> bool:
                     KEYRING_SERVICE, _get_keyring_username(provider)
                 )
                 deleted = True
-        except (keyring.errors.PasswordDeleteError, Exception):
-            pass
+        except (keyring.errors.PasswordDeleteError, Exception) as e:
+            logger.debug("keyring delete_password failed: %s", e)
     # 同时清理环境变量
     env_key = _env_key_name(provider)
     if env_key in os.environ:

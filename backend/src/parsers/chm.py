@@ -27,11 +27,23 @@ CHM 解析模块
 import re
 import shutil
 import subprocess
+import logging
 
 from pathlib import Path
 
 from bs4 import BeautifulSoup
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+logger = logging.getLogger(__name__)
+
+
+def _sanitize_path(path: str) -> str:
+    """Sanitize file path to prevent injection in subprocess calls."""
+    resolved = Path(path).resolve()
+    # Ensure no path traversal
+    if ".." in str(resolved):
+        raise ValueError(f"Path traversal detected: {path}")
+    return str(resolved)
 
 
 def _extract_chm(chm_path: str, output_dir: str) -> bool:
@@ -46,18 +58,20 @@ def _extract_chm(chm_path: str, output_dir: str) -> bool:
         是否成功
     """
     try:
+        safe_chm = _sanitize_path(chm_path)
+        safe_output = _sanitize_path(output_dir)
         result = subprocess.run(
-            ["7z", "x", "-y", f"-o{output_dir}", chm_path],
+            ["7z", "x", "-y", f"-o{safe_output}", safe_chm],
             capture_output=True,
             text=True,
             timeout=300,  # 5 分钟超时
         )
         return result.returncode == 0
     except subprocess.TimeoutExpired:
-        print(f"[CHM解析] 解压超时: {chm_path}")
+        logger.warning("CHM extraction timed out: %s", chm_path)
         return False
     except Exception as e:
-        print(f"[CHM解析] 解压失败: {e}")
+        logger.error("CHM extraction failed: %s", e)
         return False
 
 
@@ -93,7 +107,7 @@ def _detect_encoding(html_content: bytes) -> str:
             }
             return encoding_map.get(charset.lower(), charset)
     except Exception:
-        pass
+        logger.debug("Failed to detect charset from HTML meta tag, using gb18030")
 
     # 默认使用 gb18030（GBK 的超集，兼容中文 CHM）
     return "gb18030"
@@ -113,6 +127,7 @@ def _extract_text_from_html(html_content: str) -> str:
     try:
         return _extract_text_bs(html_content)
     except Exception:
+        logger.debug("BeautifulSoup extraction failed, falling back to regex")
         return _extract_text_regex(html_content)
 
 
@@ -235,7 +250,7 @@ def _extract_chapter_title(html_content: str) -> str | None:
                 if t:
                     return t[:200]
     except Exception:
-        pass
+        logger.debug("Failed to extract chapter title from HTML")
     return None
 
 
@@ -332,7 +347,7 @@ def parse_chm(
                     if text.strip():
                         sections.append((parent_title, chapter_title, location, text))
                 except Exception as e:
-                    print(f"[CHM解析] 解析 HTML 失败 {html_file}: {e}")
+                    logger.warning("Failed to parse HTML %s: %s", html_file, e)
                     continue
 
         for html_file in root_htmls:
@@ -343,11 +358,11 @@ def parse_chm(
                 if text.strip():
                     sections.append((None, chapter_title, location, text))
             except Exception as e:
-                print(f"[CHM解析] 解析 HTML 失败 {html_file}: {e}")
+                logger.warning("Failed to parse HTML %s: %s", html_file, e)
                 continue
 
         if not sections:
-            print(f"[CHM解析] 未提取到有效文本: {chm_path}")
+            logger.info("No valid text extracted from CHM: %s", chm_path)
             return []
 
         # ---- 阶段 3：按章节分块（保留层级标记） ----
@@ -394,10 +409,9 @@ def parse_chm(
                 )
                 chunk_id += 1
 
-        print(
-            f"[CHM解析] {chm_p.name}: "
-            f"{len(subdirs)} 个文档, {len(sections)} 个章节, "
-            f"{len(result)} 个分块"
+        logger.info(
+            "%s: %d docs, %d sections, %d chunks",
+            chm_p.name, len(subdirs), len(sections), len(result),
         )
         return result
 

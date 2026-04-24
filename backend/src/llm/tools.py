@@ -61,7 +61,7 @@ def _resolve_doc_name(doc_id: str) -> str:
                     _doc_name_cache[did] = entry.get("name", did)
             return _doc_name_cache.get(doc_id, doc_id)
     except Exception:
-        pass
+        logger.debug("Failed to resolve doc name for %s", doc_id)
     return doc_id
 
 

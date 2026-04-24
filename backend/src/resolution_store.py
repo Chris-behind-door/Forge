@@ -21,7 +21,8 @@ def load_resolutions() -> dict:
         return {}
     try:
         return json.loads(RESOLUTIONS_FILE.read_text(encoding="utf-8"))
-    except Exception:
+    except (json.JSONDecodeError, OSError) as e:
+        logger.error("Failed to load resolutions from %s: %s", RESOLUTIONS_FILE, e)
         return {}
 
 

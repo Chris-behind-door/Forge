@@ -155,12 +155,12 @@ async def query(request: QueryRequest) -> QueryResponse:
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        logger.error(f"Agent 查询失败: {e}")
+        logger.exception("Agent query failed")
         if request.session_id:
             from .models.session import save_message as _save
-            _save(request.session_id, "assistant", f"[错误] LLM 查询失败: {e}")
+            _save(request.session_id, "assistant", "[错误] LLM 查询失败")
         from fastapi import HTTPException
-        raise HTTPException(status_code=500, detail=f"LLM 查询失败: {e}")
+        raise HTTPException(status_code=500, detail="LLM 查询失败，请稍后重试")
 
     # 用实际检索到的 chunk 元数据构建 citations（而非正则解析回答文本）
     citations: list[Citation] = []
@@ -184,7 +184,7 @@ async def query(request: QueryRequest) -> QueryResponse:
 
             doc_name = _resolve_doc_name(doc_id)
         except Exception:
-            pass
+            logger.debug("Failed to resolve doc name for %s", doc_id)
         citations.append(
             Citation(
                 doc_id=doc_id,

@@ -83,14 +83,14 @@ def _init_schema(conn: kuzu.Connection) -> None:
         try:
             conn.execute(ddl)
         except Exception:
-            pass  # table already exists
+            logger.debug("DDL skipped (already exists): %s", ddl[:80])
 
     # Migration: add embedding field if missing (Kùzu doesn't support ALTER TABLE,
     # but IF NOT EXISTS on CREATE handles fresh DBs)
     try:
         conn.execute("ALTER TABLE Resolution ADD embedding FLOAT[512] DEFAULT [0.0]*512")
     except Exception:
-        pass  # column already exists or Kùzu doesn't support ALTER
+        logger.debug("Embedding column migration skipped (already exists)")
 
 
 def _ensure_db() -> None:
@@ -102,7 +102,7 @@ def _ensure_db() -> None:
             _db = kuzu.Database(str(KUZU_PATH))
         except RuntimeError as e:
             if "lock" in str(e).lower():
-                logger.error("Kùzu database is locked by another process: %s", e)
+                logger.exception("Kùzu database is locked by another process")
                 raise RuntimeError(
                     "数据库被其他进程占用，请关闭其他实例后重试"
                 ) from e
