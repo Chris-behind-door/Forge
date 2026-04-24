@@ -1,7 +1,7 @@
 # 工程设计工作台 - 技术方案文档
 
-> 版本: 3.0
-> 日期: 2026-04-20
+> 版本: 4.0
+> 日期: 2026-04-24
 > 作者: 克里斯 + 小爪
 > 许可证: 开源（待定）
 
@@ -20,7 +20,8 @@
 
 1. **技术资料 RAG** - 知识库检索 + 引用溯源
 2. **BYOK** - 用户自带 API Key，支持多个 LLM 厂商
-3. **会议纪要关联** - 图数据库追踪（计划中）
+3. **会议纪要关联** - 图数据库追踪决议演变链（SUPERSEDES/AMENDS/SUPPLEMENTS）
+4. **异步导入队列** - 后台串行处理，前端即时响应 + 状态追踪
 
 > ~~分流智能体~~ 已取消，由主 Agent 自行判断查询对象
 
@@ -73,8 +74,6 @@
 - 兼容性好，社区成熟
 - 打包为单可执行文件
 
-**备选方案:** Nuitka（不支持 Python 3.14，排除）
-
 ### 2.5 包管理: uv
 
 **选型理由**
@@ -111,8 +110,6 @@ StopEvent
 - 性能好（列式存储）
 - LlamaIndex 原生集成
 
-**备选方案:** Chroma（功能较少）
-
 ### 2.8 图数据库: Kùzu
 
 **选型理由**
@@ -124,7 +121,22 @@ StopEvent
 
 **注意:** Kùzu 项目已归档，但 0.11.3 版本稳定可用
 
-### 2.9 文档解析: PyMuPDF + RapidOCR（当前方案）
+**图模型:**
+
+```
+Project ──CONTAINS_MEETING──▶ Meeting ──CONTAINS_RESOLUTION──▶ Resolution
+                                                                  │
+                            SUPERSEDES ◀─────────────────────────┘
+                            AMENDS ◀─────────────────────────────┘
+                            SUPPLEMENTS ◀────────────────────────┘
+```
+
+- Meeting 节点: id, project_id, title, date, summary, source_doc_id, raw_text, created_at, status, error
+- Resolution 节点: id, meeting_id, project_id, content, idx, status, source_doc_id, created_at, embedding
+- 关系: SUPERSEDES/AMENDS/SUPPLEMENTS (Resolution → Resolution, 含 meeting_id, reason 等属性)
+- Schema 版本管理: `schema_version.txt`，ALTER TABLE 迁移
+
+### 2.9 文档解析: PyMuPDF + RapidOCR
 
 **已实现：**
 - PyMuPDF 直接提取 PDF 文字
@@ -134,7 +146,7 @@ StopEvent
 
 **备选（未实现）：** Docling（高级 PDF 能力：表格、公式、代码、图表、多格式 DOCX/PPTX/HTML/OCR）
 
-### 2.10 Embedding 模型: fastembed + bge-small-zh ✅ 已实现
+### 2.10 Embedding 模型: fastembed + bge-small-zh
 
 **已实现：**
 - 本地 ONNX Runtime，离线模式
@@ -158,79 +170,97 @@ StopEvent
 │                                                    │       │
 │  ┌─────────────────────────────────────────────────│───┐   │
 │  │  前端 (React + Vite + Ant Design)                │   │   │
-│  │  ├── 资料导入                                    │   │   │
-│  │  ├── 查询界面                                    │   │   │
-│  │  ├── 设置（API Key 配置）                        │   │   │
-│  │  └── 结果展示（含引用标签）                       │   │   │
+│  │  ├── 资料导入 / 知识库管理                        │   │   │
+│  │  ├── 会议纪要管理 (Timeline + 关联图)             │   │   │
+│  │  ├── 查询界面 (Markdown + 引用标签)               │   │   │
+│  │  └── 设置（API Key 配置）                        │   │   │
 │  └─────────────────────────────────────────────────│───┘   │
 │                                                    │       │
 │  ┌─────────────────────────────────────────────────│───┐   │
-│  │  后端 (FastAPI + PyInstaller)  ◄────────────────┘   │   │
-│  │  ├── API 服务                                       │   │
-│  │  │   ├── POST /query          # 查询（LLM + RAG）   │   │
-│  │  │   ├── POST /documents      # 导入文档            │   │
-│  │  │   ├── GET  /documents      # 文档列表            │   │
-│  │  │   ├── GET  /documents/{id} # 单文档信息          │   │
-│  │  │   ├── GET  /documents/{id}/chunks/{idx} # Chunk详情│   │
-│  │  │   ├── GET  /documents/{id}/file   # 文件预览     │   │
-│  │  │   ├── GET  /documents/{id}/chm-html # CHM HTML   │   │
-│  │  │   ├── GET  /config/llm     # LLM 配置            │   │
-│  │  │   ├── POST /config/llm     # 设置 LLM 配置       │   │
-│  │  │   ├── GET  /health         # 健康检查            │   │
-│  │  │   └── ...                                        │   │
-│  │  │                                                  │   │
-│  │  ├── LlamaIndex Workflow                            │   │
-│  │  │   ├── 分流智能体                                  │   │
-│  │  │   ├── RAG 检索                                    │   │
-│  │  │   └── 引用溯源                                    │   │
-│  │  │                                                  │   │
-│  │  ├── LanceDB (向量存储)                             │   │
-│  │  ├── Kùzu (图数据库)                                │   │
-│  │  └── 文档解析 (PDF/CHM)                             │   │
-│  └─────────────────────────────────────────────────────────┘   │
+│  │  后端 (FastAPI)  ◄──────────────────────────────┘   │   │
+│  │                                                     │   │
+│  │  routers/          services/          graph/        │   │
+│  │  ├── meetings.py   ├── meeting_service.py           │   │
+│  │  ├── documents.py  ├── resolution_service.py        │   │
+│  │  ├── sessions.py   ├── document_service.py          │   │
+│  │  ├── config.py     ├── import_worker.py             │   │
+│  │  └── projects.py   ├── chm_service.py               │   │
+│  │                     └── json_store.py               │   │
+│  │                                                     │   │
+│  │  ┌─────────────┐  ┌──────────┐  ┌───────────────┐  │   │
+│  │  │ LanceDB     │  │ Kùzu     │  │ JSON Store    │  │   │
+│  │  │ (向量检索)   │  │ (图关联)  │  │ (会议/决议)   │  │   │
+│  │  └─────────────┘  └──────────┘  └───────────────┘  │   │
+│  │                                                     │   │
+│  │  导入队列: asyncio.Queue + 串行 worker              │   │
+│  │  文档解析: PDF/CHM/DOCX → OCR → 文本                │   │
+│  └─────────────────────────────────────────────────────┘   │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐   │
-│  │  数据存储                                            │   │
-│  │  ~/.engineer_assistant/                             │   │
-│  │  ├── data/                  # 资料库                 │   │
-│  │  │   ├── uploads/           # 上传的文档             │   │
-│  │  │   ├── vectors/           # LanceDB 向量数据       │   │
-│  │  │   ├── kuzu/              # 图数据                 │   │
-│  │  │   └── documents.json     # 文档元数据            │   │
-│  │  ├── models/               # 本地模型                │   │
-│  │  │   └── fastembed/         # embedding 模型缓存     │   │
-│  │  └── config.json           # 用户配置               │   │
+│  │  数据存储  ~/.engineer_assistant/data/               │   │
+│  │  ├── uploads/           # 上传的文档                 │   │
+│  │  ├── vectors/           # LanceDB 向量数据           │   │
+│  │  ├── graph.db           # Kùzu 图数据库              │   │
+│  │  ├── meetings.json      # 会议记录                   │   │
+│  │  ├── resolutions.json   # 决议记录                   │   │
+│  │  ├── documents.json     # 文档元数据                 │   │
+│  │  ├── import_staging/    # 导入临时文件（持久化）      │   │
+│  │  └── schema_version.txt # Kùzu schema 版本          │   │
 │  └─────────────────────────────────────────────────────┘   │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
-
-外部依赖（仅 LLM API，用户自配）:
-┌─────────────────────┐
-│  用户自配 LLM API    │
-│                     │
-│  - 智谱 GLM         │
-│  - DeepSeek         │
-│  - 阿里通义          │
-│  - Ollama (本地)    │
-│  - 其他兼容 API     │
-│                     │
-│  Key 存储在系统密钥链 │
-└─────────────────────┘
 ```
 
 ---
 
 ## 4. 核心模块设计
 
-### 4.1 LLM 配置管理 (BYOK)
+### 4.1 后端分层架构
+
+后端采用 **Router + Service** 分层：
+
+- **Router 层** (`src/routers/`)：纯 HTTP 处理，参数校验，调用 service
+- **Service 层** (`src/services/`)：业务逻辑，数据读写，图查询
+- **Graph 层** (`src/graph/`)：Kùzu 连接管理，schema 初始化，Cypher 查询封装
+
+| Service | 职责 |
+|---------|------|
+| `meeting_service.py` | 会议 CRUD、文件导入、决议重新提取 |
+| `resolution_service.py` | 决议 CRUD、批量创建关联、孤儿 superseded 恢复 |
+| `document_service.py` | 文档管理、断点恢复 |
+| `import_worker.py` | 异步导入队列（asyncio.Queue + 串行 worker） |
+| `chm_service.py` | CHM 文件解析 |
+| `json_store.py` | 通用 JSON 文件读写 |
+
+### 4.2 导入队列
+
+**架构：**
+```
+前端上传 → POST /import → 创建会议(status=queued) + 文件存 staging → 入队
+                                                                       ↓
+前端轮询 ← GET /import-status ← ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   worker 串行处理
+                                                     文本提取(线程池) → LLM提取决议 → 创建关联
+```
+
+**状态流转：**
+```
+queued → processing → active (成功)
+                   → failed  (失败，可重试)
+```
+
+**关键设计：**
+- 串行处理确保跨会议关联（SUPERSEDES）正确构建
+- OCR 跑在 `asyncio.to_thread` 避免阻塞事件循环
+- staging 文件存到 `import_staging/` 目录，服务重启后可重试
+- 启动时自动将残留的 processing/queued 会议标记为 failed
+- 删除 processing 会议时发送 cancel 信号，worker 在检查点停止
+
+### 4.3 LLM 配置管理 (BYOK)
 
 **设计原则：**
 - 用户自行配置 API Key，应用不提供任何内置 Key
 - Key 存储在系统密钥链（keyring），不明文保存
 - 支持多个 LLM 厂商，用户可随时切换
-- 未配置 Key 时，仅支持本地检索（离线模式）
-
-**支持的厂商：**
 
 | 厂商 | API Base | 备注 |
 |------|----------|------|
@@ -240,252 +270,183 @@ StopEvent
 | Ollama | http://localhost:11434/v1 | 本地部署，完全离线 |
 | 自定义 | 用户填写 | 任意 OpenAI 兼容 API |
 
-**配置 API：**
-
-```python
-# GET /config/llm - 获取当前 LLM 配置
-# 返回已配置的厂商列表（不返回 Key 明文，只返回是否已配置）
-{
-    "providers": [
-        {"id": "zhipu", "name": "智谱 GLM", "configured": true},
-        {"id": "deepseek", "name": "DeepSeek", "configured": false},
-        {"id": "ollama", "name": "Ollama (本地)", "configured": false}
-    ],
-    "active_provider": "zhipu",
-    "model": "glm-4-flash"
-}
-
-# POST /config/llm - 设置 LLM 配置
-{
-    "provider": "zhipu",        # 厂商 ID
-    "api_key": "sk-xxx",        # API Key（存入 keyring）
-    "model": "glm-4-flash",     # 模型名
-    "base_url": null            # 可选，自定义 API Base
-}
-```
-
-**Key 存储（keyring）：**
-
-```python
-import keyring
-
-SERVICE_NAME = "engineer_assistant"
-
-def save_api_key(provider: str, api_key: str):
-    keyring.set_password(SERVICE_NAME, f"{provider}_api_key", api_key)
-
-def get_api_key(provider: str) -> str | None:
-    return keyring.get_password(SERVICE_NAME, f"{provider}_api_key")
-
-def delete_api_key(provider: str):
-    keyring.delete_password(SERVICE_NAME, f"{provider}_api_key")
-```
-
-**离线模式：**
-- 未配置 LLM Key 时，仅支持本地向量检索
-- 返回检索到的原始文档片段（当前已实现的行为）
-- 前端提示用户配置 Key 以获得 AI 回答
-
-### 4.2 分流智能体 ~~已取消~~
-
-原计划单独做一个 Router Agent 判断查询走技术资料还是会议纪要。
-
-**取消原因：** 增加复杂度但价值有限，主 Agent 可自行判断。
-
-**替代方案：** QueryWorkflow 的 tool_call_step 中 LLM 自行决定调用哪些工具。
-
-### 4.3 RAG 检索 (Retriever) ✅ 已实现
+### 4.4 RAG 检索 (Retriever)
 
 **已实现：**
 - fastembed bge-small-zh embedding（离线）
 - LanceDB 向量存储
 - 混合检索（向量语义 + 关键词匹配）
 - PDF 解析（直接提取 + OCR fallback + 并行）
-- CHM 解析（7z + HTML 文本提取，支持层级结构）
-- 文档元数据管理、去重、断点恢复
+- CHM 解析（7z + HTML 文本提取）
 - Chunk 上下文扩展（检索后前后各 1 chunk，去重后注入 LLM prompt）
 
-### 4.4 LLM 回答生成 ✅ 已实现
+### 4.5 会议纪要关联 ✅ 已实现
 
-通过 QueryWorkflow 的 GenerateStep 实现，prompt 位于 `src/llm/prompts.py`。
+**图模型节点和边：**
+- Meeting: id, project_id, title, date, summary, status(active/processing/queued/failed), error
+- Resolution: id, meeting_id, project_id, content, idx, status(active/superseded/amended), embedding
+- SUPERSEDES: Resolution → Resolution（新决议取代旧决议）
+- AMENDS: Resolution → Resolution（修正）
+- SUPPLEMENTS: Resolution → Resolution（补充）
 
-**已实现：**
-- 带工具调用的 Agent 循环（最多 3 轮 tool call）
-- 扩展上下文注入（带截断保护，15000 字符上限）
-- 引用提取（`[来源:xxx]` 格式）
-- 会话历史上下文传递
+**决议状态管理：**
+- 删除会议时级联删除决议，同时恢复被 SUPERSEDED 但无其他引用的决议为 active
+- 删除单条决议同理
+- 批量创建时自动检测跨会议关联（时间双向匹配 + LLM 语义判断）
 
-**引用溯源 prompt（参考）：**
+**前端展示：**
+- Timeline 组件展示会议时间线
+- 决议卡片显示关联链（SUPERSEDES/AMENDS/SUPPLEMENTS），可点击跳转
+- 关联图可视化
 
-```python
-CITATION_PROMPT = """
-你是一个专业的工程设计助手。回答问题时必须：
+### 4.6 前端组件结构
 
-1. 每个事实陈述都要标注来源，格式：[来源:文档名#页码]
-2. 区分"事实"和"推断"
-3. 如果信息来自会议纪要，标注会议日期
-
-示例回复：
----
-根据 [来源:技术规范v2.1#P15]，混凝土强度等级不应低于C30。
-
-结合 [来源:2024-03会议纪要#决议3] 中确定的设计变更要求，
-我推断（⚠️推断）需要调整配筋方案。
----
-"""
 ```
+MeetingsView (主布局)
+├── MeetingList (左侧时间线)
+│   └── MeetingStatusBadge (状态徽章)
+├── MeetingDetail (右侧详情)
+│   ├── ResolutionCard (决议卡片)
+│   └── RelationItem (关联链)
+└── ImportMeetingModal (导入弹窗)
 
-### 4.5 会议纪要关联 (Graph Engine) (待实现)
-
-**Kùzu 图查询：**
-
-```python
-import kuzu
-
-db = kuzu.Database("~/.engineer_assistant/data/kuzu")
-conn = kuzu.Connection(db)
-
-# 创建表
-conn.execute("""
-    CREATE NODE TABLE MeetingNote (
-        id STRING,
-        content STRING,
-        date DATE,
-        topic STRING,
-        PRIMARY KEY (id)
-    )
-""")
-
-conn.execute("""
-    CREATE REL TABLE SUPERSEDES (FROM MeetingNote TO MeetingNote)
-""")
-
-# 查询某个决议的完整链路
-def trace_resolution(note_id: str) -> list:
-    result = conn.execute("""
-        MATCH path = (n:MeetingNote)-[:SUPERSEDES|AMENDS|SUPPLEMENTS*]->(m:MeetingNote)
-        WHERE m.id = $note_id
-        RETURN path
-        ORDER BY n.date
-    """, {"note_id": note_id})
-    
-    return result.get_as_df()
+KnowledgeBaseView (主布局)
+├── ProjectSelector (项目选择)
+├── DocumentList (文档列表)
+└── DocumentViewer (文档预览)
 ```
 
 ---
 
 ## 5. 端口与进程管理
 
-### 5.1 端口动态分配 ✅ 已实现 (2026-04-19)
+### 5.1 端口动态分配
 
-**Tauri 侧（Rust, `src-tauri/src/main.rs`）：**
-- `find_available_port(base_port=8765, max_tries=100)` 尝试绑定端口
-- 通过 IPC event `backend-port` 传递给前端
-- 同时通过 `--port` CLI 参数和环境变量 `FORGE_PORT` 传递给后端
-
-**后端侧（Python, `run.py`）：**
-- 接收 `--port` 参数启动 FastAPI
-
-**前端：** 通过 Tauri IPC 监听 `backend-port` 事件获取端口
+- Tauri 侧: `find_available_port(base_port=8765)` 尝试绑定
+- 环境变量: `FORGE_PORT`、`FORGE_HOST` 可覆盖
+- 前端通过 Tauri IPC 获取实际端口
 
 ### 5.2 前后端通信
 
-前端通过 Tauri event 获取后端端口，或读取端口文件。无 IPC 鉴权（本地应用，无安全风险）。
+前端通过 Tauri event 获取后端端口。无 IPC 鉴权（本地应用）。
 
 ---
 
-## 6. 部署与打包
-
-### 6.1 目录结构
+## 6. 目录结构
 
 ```
 engineer_assistant/
-├── backend/                    # 客户端后端
+├── backend/
 │   ├── src/
-│   │   ├── main.py            # FastAPI 入口
+│   │   ├── main.py                 # FastAPI 入口 + startup
 │   │   ├── routers/
+│   │   │   ├── meetings.py         # 会议/决议/关联 API
+│   │   │   ├── documents.py        # 文档管理 API
+│   │   │   ├── sessions.py         # 会话管理
+│   │   │   ├── config.py           # LLM 配置
+│   │   │   └── projects.py         # 项目管理
+│   │   ├── services/
+│   │   │   ├── meeting_service.py  # 会议 CRUD + 导入
+│   │   │   ├── resolution_service.py # 决议 CRUD + 关联
+│   │   │   ├── document_service.py # 文档处理 + 断点恢复
+│   │   │   ├── import_worker.py    # 异步导入队列
+│   │   │   ├── chm_service.py      # CHM 解析
+│   │   │   └── json_store.py       # 通用 JSON 读写
+│   │   ├── graph/
+│   │   │   ├── db.py               # Kùzu 连接 + schema 迁移
+│   │   │   ├── queries.py          # Cypher 查询封装
+│   │   │   └── extract.py          # LLM 决议提取
 │   │   ├── llm/
-│   │   │   ├── workflow.py    # ✅ LlamaIndex Workflow
-│   │   │   ├── agent.py       # ✅ Agent 入口（委托 Workflow）
-│   │   │   ├── client.py      # ✅ LLM API 调用
-│   │   │   ├── prompts.py     # ✅ System prompt
-│   │   │   └── tools.py       # ✅ Agent 工具（检索等）
+│   │   │   ├── agent.py            # Agent 入口
+│   │   │   ├── client.py           # LLM API 调用
+│   │   │   ├── prompts.py          # System prompt
+│   │   │   ├── tools.py            # Agent 工具
+│   │   │   └── workflow.py         # LlamaIndex Workflow
 │   │   ├── rag/
-│   │   │   ├── embeddings.py  # ✅ fastembed
-│   │   │   └── vector_store.py # ✅ LanceDB
+│   │   │   ├── embeddings.py       # fastembed
+│   │   │   └── vector_store.py     # LanceDB
 │   │   ├── parsers/
-│   │   │   ├── pdf.py         # ✅ PyMuPDF + OCR
-│   │   │   └── chm.py         # ✅
+│   │   │   ├── pdf.py              # PyMuPDF + OCR
+│   │   │   └── chm.py              # CHM 解析
 │   │   ├── models/
-│   │   │   └── session.py     # ✅ 会话持久化
-│   │   ├── routers/
-│   │   │   ├── documents.py   # ✅ 文档管理
-│   │   │   ├── sessions.py    # ✅ 会话管理
-│   │   │   └── config.py      # ✅ LLM 配置
+│   │   │   ├── meeting.py          # Pydantic 模型
+│   │   │   └── session.py          # 会话持久化
 │   │   └── utils/
-│   │       ├── paths.py       # ✅
-n│   │       └── llm_config.py  # ✅ LLM 配置管理 + keyring
+│   │       ├── paths.py            # 路径 + schema 版本
+│   │       └── llm_config.py       # LLM 配置 + keyring
+│   ├── tests/
+│   │   └── test_api.py             # pytest 单元测试 (59 个)
 │   ├── pyproject.toml
-│   └── build.spec             # PyInstaller 配置
+│   └── build.spec
 │
-├── frontend/                   # 客户端前端
+├── frontend/
 │   ├── src/
 │   │   ├── App.tsx
-│   │   └── views/
-│   ├── package.json
-│   └── dist/                   # 打包后
+│   │   ├── api.ts
+│   │   ├── views/
+│   │   │   ├── MeetingsView.tsx    # 会议纪要主视图
+│   │   │   └── KnowledgeBaseView.tsx # 知识库主视图
+│   │   ├── components/
+│   │   │   ├── MeetingList.tsx     # 会议时间线
+│   │   │   ├── MeetingDetail.tsx   # 会议详情 + 决议
+│   │   │   ├── ResolutionCard.tsx  # 决议卡片
+│   │   │   ├── ImportMeetingModal.tsx # 导入弹窗
+│   │   │   ├── ProjectSelector.tsx
+│   │   │   ├── DocumentList.tsx
+│   │   │   └── UploadArea.tsx
+│   │   └── hooks/
+│   │       └── useProjects.ts
+│   └── package.json
 │
-├── src-tauri/                  # Tauri 配置
-│   ├── src/
-│   │   └── main.rs
-│   ├── tauri.conf.json
-│   └── binaries/               # Sidecar 放这里
-│       └── backend-{target}/
-│
-├── TECH_SPEC.md               # 本文档
+├── TECH_SPEC.md
 └── README.md
 ```
 
-### 6.2 打包流程
+---
 
-```bash
-# 1. 打包后端
-cd backend
-uv run pyinstaller build.spec
-# 输出: dist/backend (可执行文件)
+## 7. API 端点
 
-# 2. 打包前端
-cd frontend
-npm run build
-# 输出: dist/ (静态文件)
+### 会议纪要
 
-# 3. 复制 Sidecar
-cp backend/dist/backend src-tauri/binaries/backend-x86_64-unknown-linux-gnu
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/projects/{id}/meetings` | 列出项目下所有会议 |
+| POST | `/projects/{id}/meetings` | 创建会议 |
+| GET | `/meetings/{id}` | 获取会议详情 |
+| PUT | `/meetings/{id}` | 更新会议 |
+| DELETE | `/meetings/{id}` | 删除会议（支持所有状态） |
+| POST | `/projects/{id}/meetings/import` | 上传文件导入会议（异步队列） |
+| GET | `/projects/{id}/meetings/import-status` | 导入状态轮询 |
+| POST | `/meetings/{id}/retry-import` | 重试失败的导入 |
+| POST | `/meetings/{id}/extract` | 重新提取决议 |
 
-# 4. 打包 Tauri
-cargo tauri build
-# 输出:
-#   - src-tauri/target/release/bundle/appimage/ (Linux)
-#   - src-tauri/target/release/bundle/dmg/ (macOS)
-#   - src-tauri/target/release/bundle/msi/ (Windows)
-```
+### 决议
 
-### 6.3 体积预估
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/meetings/{id}/resolutions` | 列出会议决议 |
+| POST | `/meetings/{id}/resolutions` | 创建决议 |
+| PUT | `/resolutions/{id}` | 更新决议 |
+| DELETE | `/resolutions/{id}` | 删除决议 |
+| GET | `/resolutions/{id}/chain` | 获取决议关联链 |
+| GET | `/projects/{id}/resolutions/active` | 项目下所有活跃决议 |
+| POST | `/relations` | 创建关联 |
+| DELETE | `/relations` | 删除关联 |
 
-| 组件 | 体积 |
-|------|------|
-| Tauri 框架 | ~3MB |
-| Python Sidecar | ~80MB |
-| 前端 | ~5MB |
-| fastembed 模型（首次下载） | ~100MB |
-| **总计（安装包）** | **~90MB** |
-| **总计（含模型）** | **~190MB** |
+### 其他
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/query` | LLM + RAG 查询 |
+| GET/POST | `/config/llm` | LLM 配置管理 |
+| GET | `/health` | 健康检查 |
+| POST | `/admin/cleanup-resolutions` | 清理重复决议 |
 
 ---
 
-## 7. 开发计划
+## 8. 开发计划
 
-### Phase 1: MVP ✅ 基础完成
+### Phase 1: MVP ✅ 完成
 
 - [x] 项目初始化（uv + Tauri + React）
 - [x] 后端基础 API（FastAPI）
@@ -496,44 +457,43 @@ cargo tauri build
 - [x] fastembed bge-small-zh embedding（离线）
 - [x] 文档元数据管理、去重、断点恢复
 
-### Phase 2: 核心功能（进行中）
+### Phase 2: 核心功能 ✅ 完成
 
 - [x] LLM 回答生成（BYOK 模式）
-- [x] LLM 配置 API（多厂商支持，暂用 localStorage）
-- [x] 引用标签生成（[来源:文档名#位置] 格式）
-- [x] Agent 循环（带工具调用，最多 3 次查询 + 2 轮强制回答）
-- [x] 前端查询界面（markdown 渲染 + [引用:xxx] 内联标签）
-- [x] 前端设置页面（API Key 配置 + 自定义配置管理）
-- [x] 检索结果文档名显示（而非 UUID）
-- [x] chunk 上下文扩展（检索到片段后前后各 1 个 chunk）
-- [x] 引用标签可点击跳转（PDF 打开到指定页码，CHM 浏览器查看 HTML）
-- [x] CHM HTML 资源服务（图片/CSS/JS + 编码检测 + URL 重写）
-- [x] 纯 BYOK 模式确认，废弃 proxy 中转服务器
-- [x] LlamaIndex Workflow 集成（QueryWorkflow: ToolCallStep → ExpandContextStep → GenerateStep）
-- [x] ~~分流智能体~~ → 由主 Agent 自行判断查哪边，不单独分（已取消）
+- [x] LLM 配置 API（多厂商支持 + keyring）
+- [x] 引用标签生成 + 可点击跳转
+- [x] Agent 循环（带工具调用）
+- [x] chunk 上下文扩展
+- [x] CHM HTML 资源服务
+- [x] LlamaIndex Workflow 集成
 - [x] keyring 安全存储 API Key
 
-### Phase 3: 进阶功能（待启动）
+### Phase 3: 会议纪要 ✅ 完成
 
-- [ ] 图数据库集成（Kùzu 或 SQLite+邻接表，待评估）
-- [ ] 会议纪要关联查询
-- [ ] Docling 高级文档解析（表格、公式、DOCX/PPTX/HTML 多格式）
-- [x] 端口动态分配 ✅ (2026-04-19)
-- [ ] 性能优化
+- [x] Kùzu 图数据库集成
+- [x] 会议纪要 CRUD + Timeline 展示
+- [x] LLM 自动提取决议 + 关联构建
+- [x] 决议关联链（SUPERSEDES/AMENDS/SUPPLEMENTS）
+- [x] 孤儿 superseded 恢复
+- [x] 异步导入队列 + 状态追踪
+- [x] 后端 Router + Service 分层重构
+- [x] 前端组件拆分（8 个子组件）
+- [x] 59 个 pytest 单元测试
+- [x] 代码质量审计 + P0 修复
 
-### Phase 4: 发布与文档
+### Phase 4: 打包发布（待启动）
 
+- [ ] on_event → lifespan handler 迁移
 - [ ] 跨平台打包测试（macOS/Windows/Linux）
-- [x] GitHub Actions CI（Windows 已跑通）
-- [x] 后端 PyInstaller 打包 ✅
+- [ ] 性能优化
 - [ ] 用户文档
 - [ ] 开源发布
 
 ---
 
-## 8. 依赖清单
+## 9. 依赖清单
 
-### 8.1 后端 (Python)
+### 9.1 后端 (Python)
 
 ```toml
 [project]
@@ -553,15 +513,12 @@ dependencies = [
     "keyring>=24.0.0",
     "httpx>=0.27.0",
     "python-multipart>=0.0.6",
-    "pyinstaller>=6.19.0",
+    "kuzu>=0.11.0",
+    "pydantic>=2.0.0",
 ]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
 ```
 
-### 8.2 前端 (Node.js)
+### 9.2 前端 (Node.js)
 
 ```json
 {
@@ -569,9 +526,6 @@ build-backend = "hatchling.build"
     "react": "^19.2.4",
     "antd": "^6.3.3",
     "@tauri-apps/api": "^2.10.1",
-    "@tauri-apps/plugin-shell": "^2.3.5",
-    "@tauri-apps/plugin-dialog": "^2.6.0",
-    "@tauri-apps/plugin-fs": "^2.4.5",
     "react-markdown": "^10.1.0"
   },
   "devDependencies": {
@@ -583,7 +537,7 @@ build-backend = "hatchling.build"
 
 ---
 
-## 9. 风险与备选方案
+## 10. 风险与备选方案
 
 | 风险 | 影响 | 备选方案 |
 |------|------|----------|
@@ -591,13 +545,4 @@ build-backend = "hatchling.build"
 | 用户不会配 API Key | 使用门槛 | 详细的引导教程 + Ollama 本地方案 |
 | bge-small-zh 效果差 | 检索质量 | 云端 embedding API（可选） |
 | Tauri Sidecar 兼容性 | 打包问题 | 纯 PyInstaller |
-
----
-
-## 10. 参考
-
-- [LlamaIndex Workflow 文档](https://docs.llamaindex.ai/en/stable/understanding/workflows/)
-- [LanceDB 文档](https://docs.lancedb.com/)
-- [Kùzu 文档](https://kuzudb.github.io/docs/)
-- [Tauri 2.0 文档](https://v2.tauri.app/)
-- [uv 文档](https://docs.astral.sh/uv/)
+| LLM 决议提取质量 | 数据准确性 | 人工校验 + 重提

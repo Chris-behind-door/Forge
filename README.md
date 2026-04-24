@@ -5,8 +5,10 @@ A desktop application for engineering design professionals to query technical sp
 ## Features
 
 - **Technical Document RAG** - Knowledge base retrieval with citation tracking
-- **Meeting Notes RAG** - Retrieval with relationship tracing ("negation of negation")
-- **Router Agent** - Automatically determines query target
+- **Meeting Notes Management** - Timeline view with resolution extraction via LLM
+- **Resolution Relationship Graph** - Track SUPERSEDES/AMENDS/SUPPLEMENTS chains
+- **Async Import Queue** - Background processing with status tracking and retry
+- **BYOK** - Bring your own LLM API key (智谱/DeepSeek/Ollama etc.)
 - **Cross-platform** - macOS, Windows, Linux support
 
 ## Tech Stack
@@ -17,16 +19,26 @@ A desktop application for engineering design professionals to query technical sp
 - **RAG Framework**: LlamaIndex + Workflow
 - **Vector Database**: LanceDB
 - **Graph Database**: Kùzu
-- **Document Parsing**: PyMuPDF4LLM + Docling
+- **Document Parsing**: PyMuPDF + RapidOCR
 - **Embedding**: fastembed + bge-small-zh
 
 ## Project Structure
 
 ```
 engineer_assistant/
-├── proxy/              # LLM API proxy server (optional)
 ├── backend/            # Python FastAPI backend
-├── frontend/           # React + Vite frontend
+│   ├── src/
+│   │   ├── routers/    # API routes (thin HTTP layer)
+│   │   ├── services/   # Business logic
+│   │   ├── graph/      # Kùzu graph DB
+│   │   ├── llm/        # LLM + Agent
+│   │   ├── rag/        # Vector search
+│   │   └── parsers/    # PDF/CHM parsing
+│   └── tests/          # pytest (59 tests)
+├── frontend/           # React + Vite + Ant Design
+│   └── src/
+│       ├── views/      # Main views
+│       └── components/ # Reusable components
 ├── src-tauri/          # Tauri configuration
 ├── TECH_SPEC.md        # Technical specification
 └── README.md           # This file
