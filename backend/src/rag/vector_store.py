@@ -22,6 +22,7 @@ from pydantic import Field
 from ..utils.paths import VECTOR_DIR
 from .embeddings import EMBEDDING_DIM, embed_query, embed_texts
 from .scoring import rank_candidates
+from .reranker import make_reranker_fn
 
 logger = logging.getLogger(__name__)
 
@@ -196,8 +197,8 @@ def search_similar(
             }
         )
 
-    # 使用通用评分排序
-    scored_results = rank_candidates(
+    # 第一阶段：混合评分粗排，取 top_k * 2 送入 reranker
+    coarse_results = rank_candidates(
         raw_candidates,
         query,
         vector_weight=VECTOR_WEIGHT,
@@ -205,6 +206,23 @@ def search_similar(
         score_key="vector_score",
         text_key="text",
     )
+
+    # 第二阶段：Reranker 精排
+    rerank_candidates = coarse_results[: top_k * 2]
+    try:
+        reranker_fn = make_reranker_fn(top_k=top_k)
+        scored_results = rank_candidates(
+            rerank_candidates,
+            query,
+            vector_weight=VECTOR_WEIGHT,
+            keyword_weight=KEYWORD_WEIGHT,
+            score_key="vector_score",
+            text_key="text",
+            reranker=reranker_fn,
+        )
+    except Exception as e:
+        logger.warning("Reranker 不可用，回退到混合评分: %s", e)
+        scored_results = coarse_results
 
     return scored_results[:top_k]
 
