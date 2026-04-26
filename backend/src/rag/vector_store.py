@@ -3,13 +3,13 @@
 
 功能：
 - 文档分块的向量化存储
-- 混合检索：向量语义 + 关键词匹配
+- Hybrid 检索：LanceDB 原生向量 + FTS 全文搜索 + RRF 融合
+- CrossEncoder 精排（可选）
 - 按文档 ID 删除
 
-检索策略：
-- 向量检索：语义相似度
-- 关键词检索：简单的包含匹配加分
-- 融合两者分数，提高检索准确性
+检索策略（两阶段）：
+1. 粗排：LanceDB hybrid search（向量语义 + FTS 全文搜索，RRF 融合）
+2. 精排：CrossEncoder reranker 对 top 候选重排序
 """
 
 import logging
@@ -21,7 +21,6 @@ from pydantic import Field
 
 from ..utils.paths import VECTOR_DIR
 from .embeddings import EMBEDDING_DIM, embed_query, embed_texts
-from .scoring import rank_candidates
 from .reranker import make_reranker_fn
 
 logger = logging.getLogger(__name__)
@@ -29,9 +28,8 @@ logger = logging.getLogger(__name__)
 # 表名
 CHUNKS_TABLE = "chunks"
 
-# 混合检索权重
-VECTOR_WEIGHT = 0.7  # 向量检索权重
-KEYWORD_WEIGHT = 0.3  # 关键词检索权重
+# FTS 索引名称
+FTS_INDEX_NAME = "text_idx"
 
 
 class ChunkRecord(LanceModel):
@@ -60,16 +58,25 @@ def _get_or_create_table(db: lancedb.DBConnection) -> lancedb.table.Table:
         table = db.open_table(CHUNKS_TABLE)
         schema = table.schema
         pid_field = next((f for f in schema if f.name == "project_id"), None)
-        # Need rebuild if column missing, or type is not string (e.g. "null" type from bad migration)
         needs_rebuild = pid_field is None or str(pid_field.type) != "utf8"
         if needs_rebuild:
             logger.info("Migrating schema v3: recreating table with project_id column")
-            # Cannot add nullable column reliably via add_columns,
-            # so drop and recreate. Existing vectors need reprocessing anyway.
             db.drop_table(CHUNKS_TABLE)
             return db.create_table(CHUNKS_TABLE, schema=ChunkRecord)
         return table
     return db.create_table(CHUNKS_TABLE, schema=ChunkRecord)
+
+
+def _ensure_fts_index(table: lancedb.table.Table) -> None:
+    """确保 FTS 全文搜索索引存在"""
+    try:
+        index_names = [idx.name for idx in table.list_indices()]
+        if FTS_INDEX_NAME not in index_names:
+            logger.info("Creating FTS index on 'text' column...")
+            table.create_fts_index("text", replace=True)
+            logger.info("FTS index created")
+    except Exception as e:
+        logger.warning("FTS index creation failed (hybrid search will be vector-only): %s", e)
 
 
 def add_chunks(doc_id: str, chunks: list[dict], project_id: str | None = None) -> int:
@@ -110,6 +117,9 @@ def add_chunks(doc_id: str, chunks: list[dict], project_id: str | None = None) -
     # 添加到表
     table.add(records)
 
+    # 重建 FTS 索引（增量索引在 LanceDB 社区版不可靠，重建更稳）
+    _ensure_fts_index(table)
+
     return len(records)
 
 
@@ -131,10 +141,14 @@ def delete_doc_chunks(doc_id: str) -> int:
     table = db.open_table(CHUNKS_TABLE)
     count_before = table.count_rows()
 
-    # 删除（doc_id 是内部生成的 UUID，安全）
     table.delete(f"doc_id = '{doc_id}'")
 
     count_after = table.count_rows()
+
+    # 删除后重建 FTS 索引
+    if count_before != count_after:
+        _ensure_fts_index(table)
+
     return count_before - count_after
 
 
@@ -142,16 +156,15 @@ def search_similar(
     query: str, top_k: int = 5, project_id: str | None = None
 ) -> list[dict[str, Any]]:
     """
-    混合检索：向量语义 + 关键词匹配
+    两阶段检索：LanceDB hybrid 粗排 → CrossEncoder 精排
 
-    策略：
-    1. 向量检索返回 top_k * 3 个候选
-    2. 对候选计算关键词匹配分数
-    3. 融合两种分数，返回 top_k 个结果
+    粗排：向量语义搜索 + FTS 全文搜索，RRF 融合
+    精排：CrossEncoder 对 top_k * 2 候选重排序
 
     Args:
         query: 查询字符串
         top_k: 返回结果数量
+        project_id: 按项目过滤
 
     Returns:
         匹配的分块列表，包含分数
@@ -163,68 +176,99 @@ def search_similar(
 
     table = db.open_table(CHUNKS_TABLE)
 
-    # 向量检索：获取更多候选
+    # 确保 FTS 索引存在
+    has_fts = False
+    try:
+        index_names = [idx.name for idx in table.list_indices()]
+        has_fts = FTS_INDEX_NAME in index_names
+    except Exception:
+        pass
+
+    # 生成查询向量
     query_vector = embed_query(query)
-    search_obj = table.search(query_vector).limit(top_k * 3)
-    # 按 project_id 过滤：
-    #   指定项目 → 该项目 + 通用知识
-    #   不指定 → 只查通用知识
+
+    # 构建 project_id 过滤条件
     if project_id is not None:
         safe_pid = project_id.replace("'", "''")
-        search_obj = search_obj.where(
-            f"project_id = '{safe_pid}' OR project_id IS NULL"
-        )
+        where_clause = f"project_id = '{safe_pid}' OR project_id IS NULL"
     else:
-        search_obj = search_obj.where("project_id IS NULL")
-    candidates = search_obj.to_pydantic(ChunkRecord)
+        where_clause = "project_id IS NULL"
 
-    if not candidates:
+    # 粗排候选数量
+    n_candidates = top_k * 3
+
+    # 第一阶段：粗排
+    if has_fts:
+        # Hybrid search：向量 + FTS + RRF 融合
+        try:
+            results = (
+                table.search(
+                    query_type="hybrid",
+                    vector_column_name="vector",
+                    fts_columns="text",
+                )
+                .vector(query_vector)
+                .text(query)
+                .where(where_clause)
+                .limit(n_candidates)
+                .to_list()
+            )
+        except Exception as e:
+            logger.warning("Hybrid search failed, falling back to vector-only: %s", e)
+            results = _vector_only_search(table, query_vector, where_clause, n_candidates)
+    else:
+        # FTS 不可用，纯向量搜索
+        results = _vector_only_search(table, query_vector, where_clause, n_candidates)
+
+    if not results:
         return []
 
     # 构建候选列表
-    raw_candidates = []
-    for r in candidates:
-        vector_distance = getattr(r, "_distance", 1.0)
-        vector_score = 1.0 / (1.0 + vector_distance)
-        raw_candidates.append(
+    candidates = []
+    for r in results:
+        candidates.append(
             {
-                "chunk_id": r.chunk_id,
-                "doc_id": r.doc_id,
-                "text": r.text,
-                "page": r.page,
-                "location": r.location,
-                "vector_score": vector_score,
+                "chunk_id": r.get("chunk_id", ""),
+                "doc_id": r.get("doc_id", ""),
+                "text": r.get("text", ""),
+                "page": r.get("page"),
+                "location": r.get("location"),
+                "score": r.get("_relevance_score", 0),
             }
         )
 
-    # 第一阶段：混合评分粗排，取 top_k * 2 送入 reranker
-    coarse_results = rank_candidates(
-        raw_candidates,
-        query,
-        vector_weight=VECTOR_WEIGHT,
-        keyword_weight=KEYWORD_WEIGHT,
-        score_key="vector_score",
-        text_key="text",
-    )
-
-    # 第二阶段：Reranker 精排
-    rerank_candidates = coarse_results[: top_k * 2]
+    # 第二阶段：CrossEncoder 精排
+    rerank_input = candidates[: top_k * 2]
     try:
         reranker_fn = make_reranker_fn(top_k=top_k)
-        scored_results = rank_candidates(
-            rerank_candidates,
-            query,
-            vector_weight=VECTOR_WEIGHT,
-            keyword_weight=KEYWORD_WEIGHT,
-            score_key="vector_score",
-            text_key="text",
-            reranker=reranker_fn,
+        texts = [c["text"] for c in rerank_input]
+        rerank_scores = reranker_fn(query, texts)
+        for c, rs in zip(rerank_input, rerank_scores):
+            c["reranker_score"] = rs
+            c["score"] = rs
+        rerank_input.sort(key=lambda x: x["score"], reverse=True)
+        logger.info(
+            "Reranker applied to %d candidates", len(rerank_input)
         )
+        return rerank_input[:top_k]
     except Exception as e:
-        logger.warning("Reranker 不可用，回退到混合评分: %s", e)
-        scored_results = coarse_results
+        logger.warning("Reranker unavailable, using hybrid scores: %s", e)
+        return candidates[:top_k]
 
-    return scored_results[:top_k]
+
+def _vector_only_search(
+    table: lancedb.table.Table,
+    query_vector: list[float],
+    where_clause: str,
+    limit: int,
+) -> list[dict]:
+    """纯向量搜索（FTS 不可用时的降级方案）"""
+    return (
+        table.search(query_vector, vector_column_name="vector")
+        .where(where_clause)
+        .limit(limit)
+        .to_list()
+    )
 
 
 def get_adjacent_chunks(
@@ -248,20 +292,15 @@ def get_adjacent_chunks(
 
     table = db.open_table(CHUNKS_TABLE)
 
-    # 计算需要获取的完整序号范围
     all_indices = set()
     for idx in chunk_indices:
         for offset in range(-before, after + 1):
             all_indices.add(idx + offset)
 
-    # 转换为 chunk_id 列表
-    chunk_ids = [f"{doc_id}_{i}" for i in sorted(all_indices)]
+    chunk_ids = {f"{doc_id}_{i}" for i in sorted(all_indices)}
 
-    # 查询该文档所有 chunk（LanceDB 无 IN 查询，暂用全量过滤）
-    # TODO: 文档量大时优化为逐个查询或换存储方案
     results = []
     try:
-        # 防御 SQL 注入：doc_id 应为 UUID，但做安全检查
         safe_doc_id = doc_id.replace("'", "''")
         rows = (
             table.search()
@@ -269,9 +308,7 @@ def get_adjacent_chunks(
             .limit(50000)
             .to_pydantic(ChunkRecord)
         )
-        # 按 chunk_id 过滤
         for r in rows:
-            # chunk_id 格式: {doc_id}_{index}
             parts = r.chunk_id.rsplit("_", 1)
             if len(parts) == 2 and r.chunk_id in chunk_ids:
                 idx = int(parts[1])
@@ -288,7 +325,6 @@ def get_adjacent_chunks(
     except Exception:
         return []
 
-    # 去重并按序号排序
     seen = set()
     unique = []
     for r in sorted(results, key=lambda x: x["index"]):
