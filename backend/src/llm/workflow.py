@@ -248,7 +248,7 @@ class QueryWorkflow(Workflow):
                     arguments = {}
 
                 logger.info("Tool call: %s(%s)", tool_name, arguments)
-                result, chunks = execute_tool(tool_name, arguments)
+                result, chunks = await execute_tool(tool_name, arguments)
 
                 if chunks:
                     retrieved_chunks.extend(chunks)

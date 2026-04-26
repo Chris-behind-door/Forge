@@ -17,6 +17,27 @@ _current_project_id: ContextVar[str | None] = ContextVar(
 
 # ============ 工具定义（OpenAI function calling 格式）============
 
+SEARCH_RESOLUTIONS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "search_resolutions",
+        "description": (
+            "搜索会议决议。当用户问及会议决定、决议内容、某事项是否已决定时使用。"
+            "返回相关决议及其来源会议。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "关于决议的查询，如'关于基础设计的决定'",
+                }
+            },
+            "required": ["query"],
+        },
+    },
+}
+
 SEARCH_KB_TOOL = {
     "type": "function",
     "function": {
@@ -36,7 +57,7 @@ SEARCH_KB_TOOL = {
 }
 
 # 所有可用工具列表
-ALL_TOOLS = [SEARCH_KB_TOOL]
+ALL_TOOLS = [SEARCH_KB_TOOL, SEARCH_RESOLUTIONS_TOOL]
 
 # 工具名 → 执行函数映射
 _TOOL_FUNCTIONS: dict[str, Any] = {}
@@ -98,11 +119,54 @@ def _search_knowledge_base(query: str, top_k: int = 5) -> tuple[str, list[dict]]
     return "\n\n".join(formatted), results
 
 
+# ---- Resolution search tool ----
+
+
+async def _search_resolutions(query: str, top_k: int = 5) -> tuple[str, list[dict]]:
+    """搜索与查询相关的会议决议"""
+    project_id = _current_project_id.get()
+    if not project_id:
+        return "当前未选择项目，无法搜索决议。请先选择一个项目。", []
+
+    from ..rag.embeddings import embed_query
+    from ..graph.queries import search_similar_resolutions
+
+    query_emb = embed_query(query)
+    results = await search_similar_resolutions(project_id, query_emb, top_k=top_k)
+
+    if not results:
+        return f"未找到与「{query}」相关的会议决议。", []
+
+    # Load meeting titles for context
+    meeting_titles: dict[str, str] = {}
+    try:
+        from ..resolution_store import load_resolutions
+        all_res = load_resolutions()
+        for r in all_res.values():
+            mid = r.get("meeting_id", "")
+            if mid and mid not in meeting_titles:
+                meeting_titles[mid] = mid  # placeholder
+    except Exception:
+        pass
+
+    formatted = []
+    for i, r in enumerate(results, 1):
+        score = r.get("score", 0)
+        content = r.get("content", "")
+        meeting_id = r.get("meeting_id", "")
+        formatted.append(
+            f"[决议{i}] (相关度: {score:.2f})\n{content}\n(来源会议: {meeting_id})"
+        )
+
+    return "\n\n".join(formatted), results
+
+
 # 注册工具函数
 _TOOL_FUNCTIONS["search_knowledge_base"] = _search_knowledge_base
+_TOOL_FUNCTIONS["search_resolutions"] = _search_resolutions
 
 
-def execute_tool(tool_name: str, arguments: dict) -> tuple[str, list[dict]]:
+async def execute_tool(tool_name: str, arguments: dict) -> tuple[str, list[dict]]:
     """
     执行工具函数
 
@@ -118,7 +182,11 @@ def execute_tool(tool_name: str, arguments: dict) -> tuple[str, list[dict]]:
         return f"错误：未知工具 {tool_name}", []
 
     try:
+        import asyncio as _asyncio
+
         result = func(**arguments)
+        if _asyncio.iscoroutine(result):
+            result = await result
         # 搜索工具返回 (text, chunks)，其他工具可能只返回 str
         if isinstance(result, tuple):
             text, chunks = result
