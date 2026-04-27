@@ -539,22 +539,23 @@
 
   <h4>推荐模型与价格</h4>
   <table>
-    <tr><th>模型</th><th>版本</th><th>输入价格</th><th>输出价格</th><th>特点</th></tr>
+    <tr><th>模型</th><th>输入价格（缓存命中）</th><th>输入价格（缓存未命中）</th><th>输出价格</th><th>特点</th></tr>
     <tr>
-      <td><code>deepseek-chat</code></td>
-      <td>V3.2</td>
+      <td><code>deepseek-v4-flash</code></td>
+      <td>￥0.02/百万</td>
+      <td>￥1/百万</td>
       <td>￥2/百万</td>
-      <td>￥3/百万</td>
-      <td>通用能力强，128K 上下文</td>
+      <td>超低价，1M 上下文，支持思考/非思考模式</td>
     </tr>
     <tr>
-      <td><code>deepseek-reasoner</code></td>
-      <td>V3.2</td>
-      <td>￥2/百万</td>
-      <td>￥3/百万</td>
-      <td>深度推理（思考模式）</td>
+      <td><code>deepseek-v4-pro</code></td>
+      <td>￥0.1/百万</td>
+      <td>￥12/百万</td>
+      <td>￥24/百万</td>
+      <td>旗舰级推理，1M 上下文，384K 输出</td>
     </tr>
   </table>
+  <p class="hint">💡 deepseek-chat 和 deepseek-reasoner 将逐步弃用，分别对应 v4-flash 的非思考与思考模式。v4-pro 当前限时 2.5 折至 2026/05/05。</p>
 
   <h4>接入步骤</h4>
   <ol class="steps">
@@ -744,7 +745,7 @@
     <ul>
       <li><strong>Provider：</strong>从下拉列表选择对应的平台</li>
       <li><strong>API Key：</strong>粘贴你的 API Key（会加密存储在系统密钥环中，不会泄露）</li>
-      <li><strong>模型：</strong>填入模型名称（如 <code>glm-4-flash</code>、<code>deepseek-chat</code> 等）</li>
+      <li><strong>模型：</strong>填入模型名称（如 <code>glm-4-flash</code>、<code>deepseek-v4-flash</code> 等）</li>
       <li><strong>Base URL：</strong>一般不需要改（已预填默认值），除非使用自定义 Provider</li>
     </ul>
   </li>
