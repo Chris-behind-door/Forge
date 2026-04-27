@@ -12,11 +12,32 @@ use uuid::Uuid;
 fn find_available_port(base_port: u16, max_tries: u16) -> Option<u16> {
     (0..max_tries).find_map(|offset| {
         let port = base_port + offset;
-        // TcpListener::bind will fail if port is taken
         TcpListener::bind(("127.0.0.1", port))
             .ok()
             .map(|_| port)
     })
+}
+
+#[cfg(not(debug_assertions))]
+fn spawn_output_reader(mut rx: tauri::async_runtime::Receiver<tauri_plugin_shell::process::CommandEvent>) {
+    use tauri_plugin_shell::process::CommandEvent;
+    std::thread::spawn(move || {
+        while let Some(event) = rx.blocking_recv() {
+            match event {
+                CommandEvent::Stdout(line) => println!("[backend] {}", String::from_utf8_lossy(&line)),
+                CommandEvent::Stderr(line) => eprintln!("[backend:err] {}", String::from_utf8_lossy(&line)),
+                CommandEvent::Terminated(status) => {
+                    eprintln!("[backend] Process exited with status: {:?}", status);
+                    break;
+                }
+                CommandEvent::Error(err) => {
+                    eprintln!("[backend] Error: {}", err);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
 }
 
 fn main() {
@@ -65,51 +86,49 @@ fn main() {
                     .spawn()
                     .expect("Failed to spawn backend");
             } else {
-                // Prod mode: use bundled sidecar binary
-                println!("[Forge] Attempting to start backend sidecar...");
+                // Prod mode: try sidecar first, fall back to PATH lookup
+                println!("[Forge] Attempting to start backend...");
                 println!("[Forge] Backend port: {}", backend_port);
 
-                let sidecar_command = match app.shell().sidecar("binaries/backend") {
-                    Ok(cmd) => cmd,
+                let backend_started = match app.shell().sidecar("binaries/backend") {
+                    Ok(cmd) => {
+                        match cmd
+                            .env("IPC_TOKEN", ipc_token.clone())
+                            .env("FORGE_PORT", backend_port.to_string())
+                            .spawn()
+                        {
+                            Ok((mut rx, child)) => {
+                                println!("[Forge] Backend sidecar started (PID: {:?})", child.pid());
+                                spawn_output_reader(rx);
+                                true
+                            }
+                            Err(e) => {
+                                eprintln!("[Forge] Sidecar spawn failed: {}, trying PATH lookup...", e);
+                                false
+                            }
+                        }
+                    }
                     Err(e) => {
-                        eprintln!("[Forge] ERROR: Failed to create sidecar command: {}", e);
-                        eprintln!("[Forge] The application will start without the backend.");
-                        app.emit("ipc-token", &ipc_token).ok();
-                        app.emit("backend-port", backend_port).ok();
-                        return Ok(());
+                        eprintln!("[Forge] Sidecar not found: {}, trying PATH lookup...", e);
+                        false
                     }
                 };
 
-                match sidecar_command
-                    .env("IPC_TOKEN", ipc_token.clone())
-                    .env("FORGE_PORT", backend_port.to_string())
-                    .spawn()
-                {
-                    Ok((mut rx, child)) => {
-                        println!("[Forge] Backend sidecar started successfully (PID: {:?})", child.pid());
-                        // Log sidecar output in a background thread
-                        std::thread::spawn(move || {
-                            use tauri_plugin_shell::process::CommandEvent;
-                            while let Some(event) = rx.blocking_recv() {
-                                match event {
-                                    CommandEvent::Stdout(line) => println!("[backend] {}", String::from_utf8_lossy(&line)),
-                                    CommandEvent::Stderr(line) => eprintln!("[backend:err] {}", String::from_utf8_lossy(&line)),
-                                    CommandEvent::Terminated(status) => {
-                                        eprintln!("[backend] Process exited with status: {:?}", status);
-                                        break;
-                                    }
-                                    CommandEvent::Error(err) => {
-                                        eprintln!("[backend] Error: {}", err);
-                                        break;
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        eprintln!("[Forge] ERROR: Failed to spawn backend sidecar: {}", e);
-                        eprintln!("[Forge] The application will start without the backend.");
+                if !backend_started {
+                    // Fallback: look for 'backend' in PATH (e.g. /usr/bin/backend)
+                    match Command::new("backend")
+                        .env("IPC_TOKEN", ipc_token.clone())
+                        .env("FORGE_PORT", backend_port.to_string())
+                        .env("TMPDIR", dirs::data_local_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp")))
+                        .spawn()
+                    {
+                        Ok(child) => {
+                            println!("[Forge] Backend started via PATH (PID: {:?})", child.id());
+                        }
+                        Err(e) => {
+                            eprintln!("[Forge] ERROR: Failed to start backend: {}", e);
+                            eprintln!("[Forge] The application will start without the backend.");
+                        }
                     }
                 }
             }

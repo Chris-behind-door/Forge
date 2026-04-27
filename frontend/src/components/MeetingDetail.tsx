@@ -16,6 +16,8 @@ interface Meeting {
   source_doc_id: string | null
   raw_text: string
   created_at: string
+  status?: string
+  error?: string
 }
 
 interface Props {
@@ -31,7 +33,7 @@ interface Props {
 
 export default function MeetingDetail({
   meeting, meetings, extractLoading,
-  onExtractDone, onRefreshResolutions, onSetExtractLoading, onSelectMeeting, onRetryImport,
+  onExtractDone: _onExtractDone, onRefreshResolutions: _onRefreshResolutions, onSetExtractLoading, onSelectMeeting, onRetryImport,
 }: Props) {
   const [resolutions, setResolutions] = useState<Resolution[]>([])
   const [relationMap, setRelationMap] = useState<Record<string, RelationItem[]>>({})

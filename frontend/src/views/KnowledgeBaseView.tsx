@@ -34,7 +34,7 @@ function KnowledgeBaseView() {
 
   // -------- Data --------
 
-  const waitForBackend = useCallback(async (maxRetries = 10, retryDelay = 500) => {
+  const waitForBackend = useCallback(async (maxRetries = 30, retryDelay = 2000) => {
     for (let i = 0; i < maxRetries; i++) {
       try {
         const res = await fetch(`${getApiBase()}/health`, { signal: AbortSignal.timeout(2000) })

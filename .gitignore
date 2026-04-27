@@ -58,3 +58,10 @@ backend/build/
 backend/dist/
 backend/data/
 backend/*.spec
+
+# Packaging
+packaging/SOURCES/
+packaging/BUILD/
+packaging/RPMS/
+packaging/SRPMS/
+src-tauri/target/release/bundle/
