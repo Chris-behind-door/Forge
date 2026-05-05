@@ -8,15 +8,14 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
 
-      - name: Setup Rust
+      - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
@@ -31,8 +30,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Python dependencies
+      - name: Build Python sidecar
         working-directory: backend
+        shell: pwsh
         run: |
           pip install uv
           uv venv
@@ -40,10 +40,6 @@ jobs:
           uv pip install -e ".[dev]"
           uv pip install pyinstaller
 
-      - name: Build backend sidecar with PyInstaller
-        working-directory: backend
-        run: |
-          .\.venv\Scripts\activate
           pyinstaller --onefile --name backend --console `
             --paths src `
             --collect-all lancedb `
@@ -96,21 +92,16 @@ jobs:
             --hidden-import llama_index.core.workflow `
             --hidden-import langchain_text_splitters `
             run.py
+
           New-Item -ItemType Directory -Force -Path ..\src-tauri\binaries
           Copy-Item dist\backend.exe ..\src-tauri\binaries\backend-x86_64-pc-windows-msvc.exe
 
-      - name: Install npm dependencies
+      - name: Install frontend dependencies
         run: |
           npm install
-          cd frontend
-          npm install
+          npm install --prefix frontend
 
-      - name: Build frontend
-        working-directory: frontend
-        run: npm run build
-
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
