@@ -101,6 +101,10 @@ jobs:
           npm install
           npm install --prefix frontend
 
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
       - uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
