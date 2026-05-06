@@ -53,9 +53,25 @@ def _extract_chm_hh(chm_path: str, output_dir: str) -> bool:
     try:
         safe_chm = _sanitize_path(chm_path)
         safe_output = _sanitize_path(output_dir)
-        # hh.exe -decompile <output> <chm>
+        # Ensure output dir exists
+        Path(safe_output).mkdir(parents=True, exist_ok=True)
+        # Try multiple hh.exe locations (Win10/11 may differ)
+        hh_candidates = [
+            str(Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'hh.exe'),
+            'hh.exe',  # fallback to PATH
+        ]
+        hh_exe = None
+        for candidate in hh_candidates:
+            if Path(candidate).exists() or shutil.which(candidate):
+                hh_exe = candidate
+                break
+        if not hh_exe:
+            logger.debug('hh.exe not found on this system')
+            return False
+
+        logger.info('Using hh.exe: %s', hh_exe)
         result = subprocess.run(
-            ["hh.exe", "-decompile", safe_output, safe_chm],
+            [hh_exe, '-decompile', safe_output, safe_chm],
             capture_output=True,
             text=True,
             timeout=300,
@@ -63,48 +79,61 @@ def _extract_chm_hh(chm_path: str, output_dir: str) -> bool:
         # hh.exe returns 0 even on some failures; check output dir
         if Path(safe_output).exists() and any(Path(safe_output).iterdir()):
             return True
-        logger.warning("hh.exe produced empty output for: %s", chm_path)
+        logger.warning('hh.exe produced empty output for: %s', chm_path)
         return False
     except FileNotFoundError:
-        logger.debug("hh.exe not found (not Windows?)")
+        logger.debug('hh.exe not found (not Windows?)')
         return False
     except subprocess.TimeoutExpired:
-        logger.warning("hh.exe timed out: %s", chm_path)
+        logger.warning('hh.exe timed out: %s', chm_path)
         return False
     except Exception as e:
-        logger.debug("hh.exe decompile failed: %s", e)
+        logger.debug('hh.exe decompile failed: %s', e)
         return False
 
 
 def _extract_chm_7z(chm_path: str, output_dir: str) -> bool:
-    """Use 7z to extract CHM. Works on Linux/macOS, also Windows with 7-Zip."""
-    # Try PATH first, then common Windows install locations
-    sevenz = shutil.which("7z")
-    if not sevenz and sys.platform == "win32":
-        candidates = [
-            Path(os.environ.get("ProgramFiles", "C:\\Program Files")) / "7-Zip" / "7z.exe",
-            Path(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)")) / "7-Zip" / "7z.exe",
-        ]
-        for c in candidates:
-            if c.exists():
-                sevenz = str(c)
-                break
-    if not sevenz:
+    """Use external archiver to extract CHM."""
+    safe_chm = _sanitize_path(chm_path)
+    safe_output = _sanitize_path(output_dir)
+    Path(safe_output).mkdir(parents=True, exist_ok=True)
+
+    candidates = []
+
+    # 7z (standalone or p7zip)
+    if shutil.which("7z"):
+        candidates.append(("7z", ["7z", "x", "-y", f"-o{safe_output}", safe_chm]))
+    if sys.platform == "win32":
+        pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+        pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        for base in [pf, pf86]:
+            p = Path(base) / "7-Zip" / "7z.exe"
+            if p.exists():
+                candidates.append(("7-Zip", [str(p), "x", "-y", f"-o{safe_output}", safe_chm]))
+        for base in [pf, pf86]:
+            p = Path(base) / "WinRAR" / "WinRAR.exe"
+            if p.exists():
+                candidates.append(("WinRAR", [str(p), "x", "-y", safe_chm, safe_output]))
+        for base in [pf, pf86]:
+            p = Path(base) / "Bandizip" / "bandizip.exe"
+            if p.exists():
+                candidates.append(("Bandizip", [str(p), "x", "-y", "-o:" + safe_output, safe_chm]))
+
+    if not candidates:
+        logger.debug("No external archiver found")
         return False
 
-    try:
-        safe_chm = _sanitize_path(chm_path)
-        safe_output = _sanitize_path(output_dir)
-        result = subprocess.run(
-            [sevenz, "x", "-y", f"-o{safe_output}", safe_chm],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-        return result.returncode == 0
-    except Exception as e:
-        logger.debug("7z extraction failed: %s", e)
-        return False
+    for name, cmd in candidates:
+        try:
+            logger.info("尝试使用 %s 解压...", name)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode == 0 and Path(safe_output).exists() and any(Path(safe_output).iterdir()):
+                return True
+            logger.debug("%s returned %d", name, result.returncode)
+        except Exception as e:
+            logger.debug("%s failed: %s", name, e)
+
+    return False
 
 
 def _extract_chm(chm_path: str, output_dir: str) -> bool:
