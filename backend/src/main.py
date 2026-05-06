@@ -84,22 +84,20 @@ async def on_startup():
     _worker_task = asyncio.create_task(_import_worker_loop())  # noqa: RUF006
     logger.info("Import worker task created")
     stored_version = get_schema_version()
-    if stored_version < CURRENT_SCHEMA_VERSION:
-        if stored_version == 0:
-            # 首次运行或旧数据，需要重建
-            logger.warning(
-                f"⚠️  Schema 版本不匹配 (存储: {stored_version}, 当前: {CURRENT_SCHEMA_VERSION})"
-            )
-            logger.warning(
-                "向量数据可能需要重建。如果遇到问题，请调用 POST /documents/reprocess-all"
-            )
-        else:
-            logger.info(
-                f"Schema 版本升级: {stored_version} -> {CURRENT_SCHEMA_VERSION}"
-            )
-        # 更新版本号
+    if stored_version == 0:
+        # 首次运行（全新安装），直接写入当前版本
+        logger.info("首次运行，初始化 schema 版本: %d", CURRENT_SCHEMA_VERSION)
         from .utils.paths import set_schema_version
-
+        set_schema_version(CURRENT_SCHEMA_VERSION)
+    elif stored_version < CURRENT_SCHEMA_VERSION:
+        # 版本升级
+        logger.info(
+            f"Schema 版本升级: {stored_version} -> {CURRENT_SCHEMA_VERSION}"
+        )
+        logger.info(
+            "如果遇到数据兼容问题，请调用 POST /documents/reprocess-all"
+        )
+        from .utils.paths import set_schema_version
         set_schema_version(CURRENT_SCHEMA_VERSION)
     else:
         logger.info(f"Schema 版本: {CURRENT_SCHEMA_VERSION}")
