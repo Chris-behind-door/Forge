@@ -9,13 +9,13 @@
     {
       "identifier": "shell:allow-spawn",
       "allow": [
-        { "name": "backend", "sidecar": true }
+        { "name": "binaries/backend", "sidecar": true }
       ]
     },
     {
       "identifier": "shell:allow-execute",
       "allow": [
-        { "name": "backend", "sidecar": true }
+        { "name": "binaries/backend", "sidecar": true }
       ]
     },
     {
