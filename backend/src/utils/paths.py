@@ -1,11 +1,26 @@
 """
 Common paths for the backend.
+Handles both development and PyInstaller frozen environments.
 """
 
+import sys
 from pathlib import Path
 
+
+def _resolve_backend_dir() -> Path:
+    """Resolve the backend root directory.
+
+    - Development: parent of src/ (where __file__ lives)
+    - PyInstaller: directory containing the exe
+    """
+    if getattr(sys, "frozen", False):
+        # PyInstaller bundle: use exe directory as backend root
+        return Path(sys.executable).parent
+    return Path(__file__).parent.parent.parent
+
+
 # Backend root directory
-BACKEND_DIR = Path(__file__).parent.parent.parent
+BACKEND_DIR = _resolve_backend_dir()
 
 # Data storage
 DATA_DIR = BACKEND_DIR / "data"
