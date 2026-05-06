@@ -41,17 +41,24 @@ def _extract_bundled_model() -> None:
     When distributed as a zip alongside the exe, extract it to the
     cache directory so fastembed can find it.
     """
-    # Check if cache already has model
-    model_marker = CACHE_DIR / "models--Qdrant--bge-small-zh-v1.5"
-    if model_marker.exists():
+    from pathlib import Path  # noqa: E402
+
+    # Check if cache already has model (either HF hub format or GCS format)
+    hf_marker = CACHE_DIR / "models--Qdrant--bge-small-zh-v1.5"
+    gcs_marker = CACHE_DIR / "bge-small-zh-v1.5"
+    if hf_marker.exists() or gcs_marker.exists():
         return
 
-    # Find bundled model zip: next to exe, or next to run.py
+    # Find bundled model zip: next to exe, or next to data dir
     candidates = []
     if getattr(sys, "frozen", False):
-        # PyInstaller bundle
-        candidates.append(Path(sys.executable).parent / "embedding-model.zip")
-    candidates.append(Path(__file__).parent.parent.parent / "embedding-model.zip")
+        # PyInstaller bundle: exe is in install dir
+        exe_dir = Path(sys.executable).parent
+        candidates.append(exe_dir / "embedding-model.zip")
+        # Also check data/vectors/cache relative to exe
+        candidates.append(exe_dir / "data" / "embedding-model.zip")
+    else:
+        candidates.append(Path(__file__).parent.parent.parent / "embedding-model.zip")
 
     for zip_path in candidates:
         if zip_path.exists():
@@ -59,7 +66,19 @@ def _extract_bundled_model() -> None:
             try:
                 CACHE_DIR.mkdir(parents=True, exist_ok=True)
                 with zipfile.ZipFile(zip_path, "r") as zf:
-                    zf.extractall(str(CACHE_DIR))
+                    for info in zf.infolist():
+                        # Strip top-level directory (e.g. "model-cache/")
+                        parts = Path(info.filename).parts
+                        if len(parts) <= 1:
+                            continue  # skip pure directory entries
+                        stripped = str(Path(*parts[1:]))  # remove first dir
+                        target = CACHE_DIR / stripped
+                        if info.is_dir():
+                            target.mkdir(parents=True, exist_ok=True)
+                        else:
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            with zf.open(info) as src, open(target, "wb") as dst:
+                                shutil.copyfileobj(src, dst)
                 logger.info("离线模型包解压完成")
                 return
             except Exception as e:
