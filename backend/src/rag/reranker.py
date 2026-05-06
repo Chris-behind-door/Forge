@@ -3,24 +3,32 @@ Cross-encoder Reranker 模块
 
 使用 sentence-transformers CrossEncoder 加载 bge-reranker-v2-m3。
 延迟加载：首次调用时才加载模型。
-
-集成方式：
-- scoring.py 的 rank_candidates() 已预留 reranker 接口
-- vector_store.py 的 search_similar() 调用 rank_candidates 时传入 reranker
+支持离线模型包 + 镜像源回退。
 """
 
 import logging
 import os
 import threading
+from pathlib import Path
+
+from ..utils.paths import VECTOR_DIR
+from .bundled_models import extract_bundled_zip
 
 logger = logging.getLogger(__name__)
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-# Limit HuggingFace retries to fail fast when offline
+# Limit HuggingFace timeouts to fail fast when offline
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "10")
 os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "10")
 
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
+
+# Bundled model identifiers
+_RERANKER_ZIP = "reranker-model.zip"
+_RERANKER_MODEL_DIR = "models--BAAI--bge-reranker-v2-m3"
+
+# Cache directory (shared with embedding)
+CACHE_DIR = VECTOR_DIR / "cache"
 
 _lock = threading.Lock()
 _reranker_model = None
@@ -33,20 +41,33 @@ def _load_reranker():
 
     if _reranker_model is not None:
         return _reranker_model
-    if _load_error is not None:
-        raise _load_error
+    # Allow retries
+    _load_error = None
 
     with _lock:
         if _reranker_model is not None:
             return _reranker_model
-        if _load_error is not None:
-            raise _load_error
 
         try:
             from sentence_transformers import CrossEncoder
 
             logger.info("正在加载 Reranker 模型 %s ...", RERANKER_MODEL)
-            # 1. Try offline first (if model was previously downloaded)
+
+            # 1. Try bundled model (local path)
+            snapshot_path = extract_bundled_zip(
+                zip_name=_RERANKER_ZIP,
+                cache_dir=CACHE_DIR,
+                model_dir_name=_RERANKER_MODEL_DIR,
+                model_file="model.safetensors",
+            )
+            if snapshot_path:
+                logger.info("使用离线 Reranker 模型: %s", snapshot_path)
+                model = CrossEncoder(str(snapshot_path), max_length=512, local_files_only=True)
+                logger.info("离线 Reranker 模型加载完成")
+                _reranker_model = model
+                return _reranker_model
+
+            # 2. Try offline cache
             saved_endpoint = os.environ.get("HF_ENDPOINT", "")
             try:
                 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -59,7 +80,7 @@ def _load_reranker():
             finally:
                 os.environ.pop("HF_HUB_OFFLINE", None)
 
-            # 2. Try mirrors in order, fail fast
+            # 3. Try mirrors
             mirrors = [
                 "https://hf-mirror.com",
                 "https://huggingface.mrdoge.com",
@@ -77,7 +98,7 @@ def _load_reranker():
                     last_err = e
                     continue
 
-            # All mirrors failed - reranker unavailable, search will use hybrid scores
+            # All mirrors failed
             logger.warning("Reranker 模型不可用，搜索将使用混合排序")
             _load_error = last_err or RuntimeError("Reranker 加载失败")
             raise _load_error
@@ -99,14 +120,13 @@ def rerank(query: str, texts: list[str], top_k: int | None = None) -> list[float
         top_k: 可选，只保留 top_k 个的分数（其余置 0）
 
     Returns:
-        与 texts 等长的分数列表（CrossEncoder 原始 logits，已按降序排序的索引）
+        与 texts 等长的分数列表
     """
     if not texts:
         return []
 
     model = _load_reranker()
 
-    # CrossEncoder.predict 接受 [[query, doc], ...] 格式
     pairs = [[query, t] for t in texts]
     scores = model.predict(pairs).tolist()
 
