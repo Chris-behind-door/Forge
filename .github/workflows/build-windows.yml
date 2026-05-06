@@ -58,7 +58,7 @@ jobs:
           print('Model downloaded successfully')
           "
 
-          Compress-Archive -Path model-cache -DestinationPath embedding-model.zip
+          Compress-Archive -Path model-cache\* -DestinationPath embedding-model.zip
           Write-Host "Model archive created"
 
       - name: Package with PyInstaller
