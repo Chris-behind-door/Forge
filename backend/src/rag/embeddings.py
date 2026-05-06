@@ -48,11 +48,17 @@ def _extract_bundled_model() -> Path | None:
 
     Returns the snapshot path if successful, None otherwise.
     """
-    # Already extracted?
+    # Already extracted and valid?
     existing = _find_extracted_snapshot()
     if existing:
         logger.info("模型已存在于: %s", existing)
         return existing
+
+    # Clean up any leftover partial extraction
+    partial = CACHE_DIR / _MODEL_SNAPSHOT_DIR
+    if partial.exists():
+        logger.info("清理不完整的模型目录: %s", partial)
+        shutil.rmtree(partial, ignore_errors=True)
 
     # Find bundled model zip
     candidates: list[Path] = []
@@ -69,13 +75,33 @@ def _extract_bundled_model() -> Path | None:
             try:
                 CACHE_DIR.mkdir(parents=True, exist_ok=True)
                 with zipfile.ZipFile(zip_path, "r") as zf:
+                    # Detect if zip has a single top-level wrapper dir
+                    top_dirs = set()
                     for info in zf.infolist():
                         parts = Path(info.filename).parts
-                        if len(parts) <= 1:
+                        if parts:
+                            top_dirs.add(parts[0])
+                    should_strip = len(top_dirs) == 1 and top_dirs.pop() not in ("models--",)
+                    # Check if the single top dir is NOT the model dir itself
+                    should_strip = len(top_dirs) == 1
+                    top_name = list(top_dirs)[0] if top_dirs else ""
+                    # Don't strip if the top dir IS the model dir
+                    if top_name.startswith("models--"):
+                        should_strip = False
+
+                    logger.info("zip顶层目录: %s, strip=%s", top_name, should_strip)
+
+                    for info in zf.infolist():
+                        parts = Path(info.filename).parts
+                        if not parts:
                             continue
-                        # Strip top-level directory
-                        stripped = str(Path(*parts[1:]))
-                        target = CACHE_DIR / stripped
+                        if should_strip and len(parts) > 1:
+                            rel = str(Path(*parts[1:]))
+                        else:
+                            rel = info.filename
+                        if not rel:
+                            continue
+                        target = CACHE_DIR / rel
                         if info.is_dir():
                             target.mkdir(parents=True, exist_ok=True)
                         else:
