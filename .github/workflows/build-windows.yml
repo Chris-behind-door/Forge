@@ -76,13 +76,22 @@ jobs:
           path = snapshot_download(
               'BAAI/bge-reranker-v2-m3',
               cache_dir=str(cache_dir),
-              allow_patterns=['model.safetensors', 'config.json', 'tokenizer.json', 'tokenizer_config.json', 'special_tokens_map.json', 'sentencepiece.bpe.model'],
           )
           print(f'Downloaded to {path}')
           "
 
-          Compress-Archive -Path reranker-cache\* -DestinationPath reranker-model.zip
-          Write-Host "Reranker archive created"
+          .\.venv\Scripts\activate
+          python -c "
+          import zipfile
+          from pathlib import Path
+          print('Creating reranker-model.zip ...')
+          cache = Path('reranker-cache')
+          with zipfile.ZipFile('reranker-model.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
+              for f in sorted(cache.rglob('*')):
+                  if f.is_file():
+                      zf.write(f, f.relative_to(cache))
+          print(f'Created {Path("reranker-model.zip").stat().st_size / 1024 / 1024:.0f} MB')
+          "
 
       - name: Package with PyInstaller
         working-directory: backend
