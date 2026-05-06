@@ -86,6 +86,9 @@ def _extract_bundled_model() -> Path | None:
 
                 snapshot = _find_extracted_snapshot()
                 if snapshot:
+                    logger.info("模型快照目录: %s", snapshot)
+                    onnx_file = snapshot / "model_optimized.onnx"
+                    logger.info("ONNX文件: %s (存在=%s, 大小=%s)", onnx_file, onnx_file.exists(), onnx_file.stat().st_size if onnx_file.exists() else 'N/A')
                     return snapshot
                 logger.warning("解压完成但未找到模型快照目录")
             except Exception as e:
@@ -113,14 +116,14 @@ def _download_model() -> TextEmbedding:
 
     if _embedding_model is not None:
         return _embedding_model
-    if _model_error is not None:
-        raise _model_error
+    # Don't cache errors permanently - allow retries on new requests
+    # (e.g. user might fix network or add model files between attempts)
 
     with _model_lock:
         if _embedding_model is not None:
             return _embedding_model
-        if _model_error is not None:
-            raise _model_error
+        # Reset error on retry
+        _model_error = None
 
         try:
             # 1. Try bundled model (specific_model_path bypasses all cache logic)
