@@ -5,7 +5,11 @@ Uses fastembed with bge-small-zh for Chinese text.
 
 import logging
 import os
+import sys
 import threading
+import zipfile
+import shutil
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +22,6 @@ _MIRROR_ENDPOINTS = [
 
 from fastembed import TextEmbedding  # noqa: E402
 from ..utils.paths import VECTOR_DIR  # noqa: E402
-import sys  # noqa: E402
-import zipfile  # noqa: E402
-import shutil  # noqa: E402
 
 # Model configuration
 EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
@@ -41,8 +42,6 @@ def _extract_bundled_model() -> None:
     When distributed as a zip alongside the exe, extract it to the
     cache directory so fastembed can find it.
     """
-    from pathlib import Path  # noqa: E402
-
     # Check if cache already has model (either HF hub format or GCS format)
     hf_marker = CACHE_DIR / "models--Qdrant--bge-small-zh-v1.5"
     gcs_marker = CACHE_DIR / "bge-small-zh-v1.5"
