@@ -40,6 +40,33 @@ jobs:
           uv pip install -e ".[dev]"
           uv pip install pyinstaller
 
+      - name: Pre-download embedding model
+        working-directory: backend
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\activate
+          python -c "
+          import os
+          os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
+          from pathlib import Path
+          cache_dir = Path('model-cache')
+          cache_dir.mkdir(parents=True, exist_ok=True)
+          from fastembed import TextEmbedding
+          print('Downloading embedding model...')
+          model = TextEmbedding('BAAI/bge-small-zh-v1.5', cache_dir=str(cache_dir))
+          list(model.embed(['test']))
+          print('Model downloaded successfully')
+          "
+
+          Compress-Archive -Path model-cache -DestinationPath embedding-model.zip
+          Write-Host "Model archive created"
+
+      - name: Package with PyInstaller
+        working-directory: backend
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\activate
+
           pyinstaller --onefile --name backend --console `
             --paths src `
             --collect-all lancedb `
@@ -119,3 +146,4 @@ jobs:
           path: |
             src-tauri/target/release/bundle/msi/*.msi
             src-tauri/target/release/bundle/nsis/*.exe
+            backend/embedding-model.zip

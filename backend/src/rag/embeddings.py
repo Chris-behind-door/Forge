@@ -10,10 +10,17 @@ import threading
 logger = logging.getLogger(__name__)
 
 # 国内镜像：优先 hf-mirror，失败后回退 modelscope
-os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+_MIRROR_ENDPOINTS = [
+    "https://hf-mirror.com",
+    "https://huggingface.mrdoge.com",
+    "https://huggingface.com",
+]
 
 from fastembed import TextEmbedding  # noqa: E402
 from ..utils.paths import VECTOR_DIR  # noqa: E402
+import sys  # noqa: E402
+import zipfile  # noqa: E402
+import shutil  # noqa: E402
 
 # Model configuration
 EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
@@ -28,10 +35,43 @@ _embedding_model: TextEmbedding | None = None
 _model_error: Exception | None = None
 
 
+def _extract_bundled_model() -> None:
+    """Extract embedding model from bundled zip if cache is empty.
+
+    When distributed as a zip alongside the exe, extract it to the
+    cache directory so fastembed can find it.
+    """
+    # Check if cache already has model
+    model_marker = CACHE_DIR / "models--Qdrant--bge-small-zh-v1.5"
+    if model_marker.exists():
+        return
+
+    # Find bundled model zip: next to exe, or next to run.py
+    candidates = []
+    if getattr(sys, "frozen", False):
+        # PyInstaller bundle
+        candidates.append(Path(sys.executable).parent / "embedding-model.zip")
+    candidates.append(Path(__file__).parent.parent.parent / "embedding-model.zip")
+
+    for zip_path in candidates:
+        if zip_path.exists():
+            logger.info("发现离线模型包: %s，正在解压...", zip_path)
+            try:
+                CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                with zipfile.ZipFile(zip_path, "r") as zf:
+                    zf.extractall(str(CACHE_DIR))
+                logger.info("离线模型包解压完成")
+                return
+            except Exception as e:
+                logger.warning("离线模型包解压失败: %s", e)
+
+    logger.info("未找到离线模型包，将尝试在线下载")
+
+
 def _download_model() -> TextEmbedding:
     """
     Download (if needed) and load the embedding model.
-    Uses hf-mirror.com for China mainland access.
+    Tries multiple HF mirrors for China mainland access.
     Thread-safe: concurrent callers will wait for the first to complete.
     """
     global _embedding_model, _model_error
@@ -49,17 +89,50 @@ def _download_model() -> TextEmbedding:
             raise _model_error
 
         try:
-            logger.info("正在加载/下载嵌入模型 %s ...", EMBEDDING_MODEL)
-            model = TextEmbedding(
-                EMBEDDING_MODEL,
-                cache_dir=str(CACHE_DIR),
-                local_files_only=False,
+            # 1. Try local cache first (model may have been pre-downloaded)
+            logger.info("检查本地嵌入模型缓存...")
+            try:
+                model = TextEmbedding(
+                    EMBEDDING_MODEL,
+                    cache_dir=str(CACHE_DIR),
+                    local_files_only=True,
+                )
+                list(model.embed(["test"]))
+                logger.info("嵌入模型从本地缓存加载完成")
+                _embedding_model = model
+                return _embedding_model
+            except Exception:
+                logger.info("本地缓存无模型")
+
+            # 1.5 Try extracting bundled model archive
+            _extract_bundled_model()
+
+            # 2. Try each mirror endpoint
+            last_err = None
+            for endpoint in _MIRROR_ENDPOINTS:
+                try:
+                    os.environ["HF_ENDPOINT"] = endpoint
+                    logger.info("尝试从 %s 下载模型...", endpoint)
+                    model = TextEmbedding(
+                        EMBEDDING_MODEL,
+                        cache_dir=str(CACHE_DIR),
+                        local_files_only=False,
+                    )
+                    list(model.embed(["test"]))
+                    logger.info("嵌入模型从 %s 下载成功", endpoint)
+                    _embedding_model = model
+                    return _embedding_model
+                except Exception as e:
+                    logger.warning("从 %s 下载失败: %s", endpoint, e)
+                    last_err = e
+                    continue
+
+            raise RuntimeError(
+                f"嵌入模型下载失败（尝试了所有镜像源）。"
+                f"请检查网络连接，或手动下载模型到: {CACHE_DIR}\n"
+                f"最后错误: {last_err}"
             )
-            # Trigger lazy initialization (downloads if needed)
-            list(model.embed(["test"]))
-            logger.info("嵌入模型加载完成")
-            _embedding_model = model
-            return _embedding_model
+
         except Exception as e:
             _model_error = e
             logger.error("嵌入模型加载失败: %s", e)
