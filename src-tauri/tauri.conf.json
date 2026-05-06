@@ -34,7 +34,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/backend"]
+    "externalBin": ["backend"]
   },
   "plugins": {
     "shell": {

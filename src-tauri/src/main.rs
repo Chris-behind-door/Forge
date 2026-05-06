@@ -90,7 +90,7 @@ fn main() {
                 println!("[Forge] Attempting to start backend...");
                 println!("[Forge] Backend port: {}", backend_port);
 
-                let backend_started = match app.shell().sidecar("binaries/backend") {
+                let backend_started = match app.shell().sidecar("backend") {
                     Ok(cmd) => {
                         match cmd
                             .env("IPC_TOKEN", ipc_token.clone())
