@@ -24,10 +24,12 @@ CHM 解析模块
   编码到 text 中作为 [文档:xxx] 和 [章节:xxx] 标记。
 """
 
+import os
 import re
 import shutil
 import subprocess
 import logging
+import sys
 
 from pathlib import Path
 
@@ -46,9 +48,71 @@ def _sanitize_path(path: str) -> str:
     return str(resolved)
 
 
+def _extract_chm_hh(chm_path: str, output_dir: str) -> bool:
+    """Windows: use built-in hh.exe -decompile (no install needed)."""
+    try:
+        safe_chm = _sanitize_path(chm_path)
+        safe_output = _sanitize_path(output_dir)
+        # hh.exe -decompile <output> <chm>
+        result = subprocess.run(
+            ["hh.exe", "-decompile", safe_output, safe_chm],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        # hh.exe returns 0 even on some failures; check output dir
+        if Path(safe_output).exists() and any(Path(safe_output).iterdir()):
+            return True
+        logger.warning("hh.exe produced empty output for: %s", chm_path)
+        return False
+    except FileNotFoundError:
+        logger.debug("hh.exe not found (not Windows?)")
+        return False
+    except subprocess.TimeoutExpired:
+        logger.warning("hh.exe timed out: %s", chm_path)
+        return False
+    except Exception as e:
+        logger.debug("hh.exe decompile failed: %s", e)
+        return False
+
+
+def _extract_chm_7z(chm_path: str, output_dir: str) -> bool:
+    """Use 7z to extract CHM. Works on Linux/macOS, also Windows with 7-Zip."""
+    # Try PATH first, then common Windows install locations
+    sevenz = shutil.which("7z")
+    if not sevenz and sys.platform == "win32":
+        candidates = [
+            Path(os.environ.get("ProgramFiles", "C:\\Program Files")) / "7-Zip" / "7z.exe",
+            Path(os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)")) / "7-Zip" / "7z.exe",
+        ]
+        for c in candidates:
+            if c.exists():
+                sevenz = str(c)
+                break
+    if not sevenz:
+        return False
+
+    try:
+        safe_chm = _sanitize_path(chm_path)
+        safe_output = _sanitize_path(output_dir)
+        result = subprocess.run(
+            [sevenz, "x", "-y", f"-o{safe_output}", safe_chm],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        return result.returncode == 0
+    except Exception as e:
+        logger.debug("7z extraction failed: %s", e)
+        return False
+
+
 def _extract_chm(chm_path: str, output_dir: str) -> bool:
     """
-    使用 7z 解压 CHM 文件
+    解压 CHM 文件，按优先级尝试多种工具：
+
+    1. hh.exe -decompile（Windows 自带，无需安装）
+    2. 7z（Linux 首选，Windows 上需安装 7-Zip）
 
     Args:
         chm_path: CHM 文件路径
@@ -57,22 +121,26 @@ def _extract_chm(chm_path: str, output_dir: str) -> bool:
     Returns:
         是否成功
     """
-    try:
-        safe_chm = _sanitize_path(chm_path)
-        safe_output = _sanitize_path(output_dir)
-        result = subprocess.run(
-            ["7z", "x", "-y", f"-o{safe_output}", safe_chm],
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 分钟超时
-        )
-        return result.returncode == 0
-    except subprocess.TimeoutExpired:
-        logger.warning("CHM extraction timed out: %s", chm_path)
-        return False
-    except Exception as e:
-        logger.error("CHM extraction failed: %s", e)
-        return False
+    # Windows: prefer built-in hh.exe
+    if sys.platform == "win32":
+        logger.info("尝试使用 hh.exe 反编译 CHM...")
+        if _extract_chm_hh(chm_path, output_dir):
+            logger.info("hh.exe 反编译成功")
+            return True
+        logger.warning("hh.exe 失败，回退到 7z...")
+
+    # Try 7z (works everywhere if installed)
+    logger.info("尝试使用 7z 解压 CHM...")
+    if _extract_chm_7z(chm_path, output_dir):
+        logger.info("7z 解压成功")
+        return True
+
+    logger.error(
+        "CHM 解压失败：未找到可用的解压工具。"
+        "Windows 用户无需额外操作（hh.exe 应该自带）；"
+        "Linux 用户请安装 p7zip-full。"
+    )
+    return False
 
 
 def _detect_encoding(html_content: bytes) -> str:

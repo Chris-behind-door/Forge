@@ -199,6 +199,17 @@ async def upload(request: DocumentUploadRequest) -> Document:
     metadata = _load_metadata()
     for doc in metadata.values():
         if doc.file_hash == file_hash:
+            # 如果旧文档处于 error 状态，自动清除后允许重新上传
+            if doc.status == "error":
+                logger.info(f"发现同哈希的 error 文档 {doc.id[:8]}，自动清除以允许重新上传")
+                cancel_processing(doc.id)
+                stored_path = Path(doc.stored_path)
+                if stored_path.exists():
+                    stored_path.unlink()
+                delete_doc_chunks(doc.id)
+                del metadata[doc.id]
+                _save_metadata(metadata)
+                break
             raise HTTPException(status_code=409, detail=f"文件内容已存在: {doc.name}")
 
     doc_id = str(uuid4())
