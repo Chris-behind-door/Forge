@@ -16,6 +16,9 @@ import threading
 logger = logging.getLogger(__name__)
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+# Limit HuggingFace retries to fail fast when offline
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "10")
+os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "10")
 
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 
@@ -43,13 +46,46 @@ def _load_reranker():
             from sentence_transformers import CrossEncoder
 
             logger.info("正在加载 Reranker 模型 %s ...", RERANKER_MODEL)
-            model = CrossEncoder(RERANKER_MODEL, max_length=512)
-            logger.info("Reranker 模型加载完成")
-            _reranker_model = model
-            return _reranker_model
+            # 1. Try offline first (if model was previously downloaded)
+            saved_endpoint = os.environ.get("HF_ENDPOINT", "")
+            try:
+                os.environ["HF_HUB_OFFLINE"] = "1"
+                model = CrossEncoder(RERANKER_MODEL, max_length=512)
+                logger.info("Reranker 模型从本地缓存加载完成")
+                _reranker_model = model
+                return _reranker_model
+            except Exception:
+                logger.info("本地无 Reranker 模型缓存")
+            finally:
+                os.environ.pop("HF_HUB_OFFLINE", None)
+
+            # 2. Try mirrors in order, fail fast
+            mirrors = [
+                "https://hf-mirror.com",
+                "https://huggingface.mrdoge.com",
+            ]
+            last_err = None
+            for mirror in mirrors:
+                os.environ["HF_ENDPOINT"] = mirror
+                try:
+                    model = CrossEncoder(RERANKER_MODEL, max_length=512)
+                    logger.info("Reranker 模型从 %s 加载完成", mirror)
+                    _reranker_model = model
+                    return _reranker_model
+                except Exception as e:
+                    logger.debug("从 %s 加载 reranker 失败: %s", mirror, e)
+                    last_err = e
+                    continue
+
+            # All mirrors failed - reranker unavailable, search will use hybrid scores
+            logger.warning("Reranker 模型不可用，搜索将使用混合排序")
+            _load_error = last_err or RuntimeError("Reranker 加载失败")
+            raise _load_error
+
         except Exception as e:
-            _load_error = e
-            logger.error("Reranker 模型加载失败: %s", e)
+            if e is not _load_error:
+                _load_error = e
+                logger.error("Reranker 模型加载失败: %s", e)
             raise
 
 
