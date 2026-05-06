@@ -70,14 +70,18 @@ jobs:
           python -c "
           from pathlib import Path
           from huggingface_hub import snapshot_download
-          cache_dir = Path('reranker-cache')
-          cache_dir.mkdir(parents=True, exist_ok=True)
+          out = Path('reranker-snapshot')
+          out.mkdir(parents=True, exist_ok=True)
           print('Downloading reranker model...')
-          path = snapshot_download(
+          # Download directly to flat dir (no HF cache overhead)
+          snapshot_download(
               'BAAI/bge-reranker-v2-m3',
-              cache_dir=str(cache_dir),
+              local_dir=str(out),
           )
-          print(f'Downloaded to {path}')
+          print(f'Downloaded to {out}')
+          for f in sorted(out.rglob('*')):
+              if f.is_file():
+                  print(f'  {f.relative_to(out)} ({f.stat().st_size:,} bytes)')
           "
 
           .\.venv\Scripts\activate
@@ -85,12 +89,13 @@ jobs:
           import zipfile
           from pathlib import Path
           print('Creating reranker-model.zip ...')
-          cache = Path('reranker-cache')
+          snap = Path('reranker-snapshot')
           with zipfile.ZipFile('reranker-model.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
-              for f in sorted(cache.rglob('*')):
+              for f in sorted(snap.rglob('*')):
                   if f.is_file():
-                      zf.write(f, f.relative_to(cache))
-          print(f'Created {Path("reranker-model.zip").stat().st_size / 1024 / 1024:.0f} MB')
+                      zf.write(f, f.relative_to(snap))
+          size_mb = Path('reranker-model.zip').stat().st_size / 1024 / 1024
+          print(f'Created {size_mb:.0f} MB')
           "
 
       - name: Package with PyInstaller

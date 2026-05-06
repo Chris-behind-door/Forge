@@ -19,7 +19,7 @@ def extract_bundled_zip(
     model_dir_name: str,
     model_file: str = "model_optimized.onnx",
 ) -> Path | None:
-    """Extract a bundled model zip to cache_dir.
+    """Extract a bundled model zip to cache_dir/model_dir_name.
 
     Looks for zip_name next to the exe (PyInstaller) or in the project root.
     Smart strip: removes a single wrapper directory if present.
@@ -27,24 +27,25 @@ def extract_bundled_zip(
     Args:
         zip_name: Name of the zip file (e.g. "embedding-model.zip").
         cache_dir: Where to extract to.
-        model_dir_name: Expected directory name after extraction
+        model_dir_name: Target directory name under cache_dir
             (e.g. "models--Qdrant--bge-small-zh-v1.5").
-        model_file: A file that must exist in the snapshot to confirm valid extraction.
+        model_file: A file that must exist to confirm valid extraction.
 
     Returns:
-        Path to the snapshot directory containing model_file, or None.
+        Path to the directory containing model_file, or None.
     """
+    target_dir = cache_dir / model_dir_name
+
     # Check if already extracted and valid
-    existing = _find_snapshot(cache_dir, model_dir_name, model_file)
+    existing = _find_model_file(target_dir, model_file)
     if existing:
-        logger.info("模型已存在: %s", existing)
-        return existing
+        logger.info("模型已存在: %s", existing.parent)
+        return existing.parent
 
     # Clean up any incomplete extraction
-    partial = cache_dir / model_dir_name
-    if partial.exists():
-        logger.info("清理不完整目录: %s", partial)
-        shutil.rmtree(partial, ignore_errors=True)
+    if target_dir.exists():
+        logger.info("清理不完整目录: %s", target_dir)
+        shutil.rmtree(target_dir, ignore_errors=True)
 
     # Find zip file
     candidates: list[Path] = []
@@ -61,7 +62,7 @@ def extract_bundled_zip(
 
         logger.info("发现离线模型包: %s，正在解压...", zip_path)
         try:
-            cache_dir.mkdir(parents=True, exist_ok=True)
+            target_dir.mkdir(parents=True, exist_ok=True)
             with zipfile.ZipFile(zip_path, "r") as zf:
                 # Detect if zip has a single top-level wrapper dir
                 top_dirs: set[str] = set()
@@ -73,11 +74,10 @@ def extract_bundled_zip(
                 should_strip = False
                 if len(top_dirs) == 1:
                     top_name = next(iter(top_dirs))
-                    # Don't strip if the top dir IS the model dir
-                    if not top_name.startswith("models--"):
-                        should_strip = True
-
-                logger.info("zip顶层: %s, strip=%s", top_dirs, should_strip)
+                    should_strip = True
+                    logger.info("zip顶层: %s, 将strip", top_name)
+                else:
+                    logger.info("zip有多个顶层目录，不strip")
 
                 for info in zf.infolist():
                     parts = Path(info.filename).parts
@@ -89,28 +89,27 @@ def extract_bundled_zip(
                         rel = info.filename
                     if not rel:
                         continue
-                    target = cache_dir / rel
+                    dest = target_dir / rel
                     if info.is_dir():
-                        target.mkdir(parents=True, exist_ok=True)
+                        dest.mkdir(parents=True, exist_ok=True)
                     else:
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        with zf.open(info) as src, open(target, "wb") as dst:
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        with zf.open(info) as src, open(dest, "wb") as dst:
                             shutil.copyfileobj(src, dst)
 
             logger.info("离线模型包解压完成")
 
-            snapshot = _find_snapshot(cache_dir, model_dir_name, model_file)
-            if snapshot:
-                logger.info("模型快照: %s", snapshot)
-                onnx = snapshot / model_file
+            found = _find_model_file(target_dir, model_file)
+            if found:
+                logger.info("模型目录: %s", found.parent)
                 logger.info(
                     "%s: 存在=%s, 大小=%s",
-                    model_file, onnx.exists(),
-                    onnx.stat().st_size if onnx.exists() else "N/A",
+                    model_file, found.exists(),
+                    found.stat().st_size if found.exists() else "N/A",
                 )
-                return snapshot
+                return found.parent
 
-            logger.warning("解压完成但未找到 %s/%s", model_dir_name, model_file)
+            logger.warning("解压完成但未找到 %s", model_file)
 
         except Exception as e:
             logger.warning("离线模型包解压失败: %s", e)
@@ -119,14 +118,17 @@ def extract_bundled_zip(
     return None
 
 
-def _find_snapshot(
-    cache_dir: Path, model_dir_name: str, model_file: str
-) -> Path | None:
-    """Find a valid snapshot directory containing model_file."""
-    snapshots_root = cache_dir / model_dir_name / "snapshots"
-    if not snapshots_root.exists():
+def _find_model_file(directory: Path, model_file: str) -> Path | None:
+    """Find model_file in directory (may be nested in snapshots/)."""
+    if not directory.exists():
         return None
-    for snap in snapshots_root.iterdir():
-        if snap.is_dir() and (snap / model_file).exists():
-            return snap
+    # Direct file
+    if (directory / model_file).is_file():
+        return directory / model_file
+    # HF cache format: snapshots/<hash>/model_file
+    snapshots = directory / "snapshots"
+    if snapshots.exists():
+        for snap in snapshots.iterdir():
+            if snap.is_dir() and (snap / model_file).is_file():
+                return snap / model_file
     return None

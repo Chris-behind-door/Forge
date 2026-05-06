@@ -25,7 +25,7 @@ RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
 
 # Bundled model identifiers
 _RERANKER_ZIP = "reranker-model.zip"
-_RERANKER_MODEL_DIR = "models--BAAI--bge-reranker-v2-m3"
+_RERANKER_MODEL_DIR = "reranker"  # flat directory, not HF cache format
 
 # Cache directory (shared with embedding)
 CACHE_DIR = VECTOR_DIR / "cache"
