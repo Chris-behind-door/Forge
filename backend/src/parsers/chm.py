@@ -48,8 +48,27 @@ def _sanitize_path(path: str) -> str:
     return str(resolved)
 
 
+def _unblock_file_windows(file_path: str) -> None:
+    """Remove Zone.Identifier (Windows "blocked" flag) from a file.
+
+    Windows marks files from network/shares/downloads with a Zone.Identifier
+    alternate data stream. hh.exe silently refuses to decompile such CHM files.
+    """
+    try:
+        subprocess.run(
+            ["powershell", "-Command",
+             f"Unblock-File -Path '{file_path}' -ErrorAction SilentlyContinue"],
+            capture_output=True,
+            timeout=10,
+        )
+    except Exception:
+        logger.debug("Unblock-File failed (non-critical)")
+
+
 def _extract_chm_hh(chm_path: str, output_dir: str) -> bool:
     """Windows: use built-in hh.exe -decompile (no install needed)."""
+    import time
+
     try:
         safe_chm = _sanitize_path(chm_path)
         safe_output = _sanitize_path(output_dir)
@@ -69,6 +88,9 @@ def _extract_chm_hh(chm_path: str, output_dir: str) -> bool:
             logger.debug('hh.exe not found on this system')
             return False
 
+        # Remove Windows Zone.Identifier before decompiling
+        _unblock_file_windows(safe_chm)
+
         logger.info('Using hh.exe: %s', hh_exe)
         result = subprocess.run(
             [hh_exe, '-decompile', safe_output, safe_chm],
@@ -76,9 +98,15 @@ def _extract_chm_hh(chm_path: str, output_dir: str) -> bool:
             text=True,
             timeout=300,
         )
-        # hh.exe returns 0 even on some failures; check output dir
-        if Path(safe_output).exists() and any(Path(safe_output).iterdir()):
-            return True
+
+        # hh.exe may return before decompile finishes on some Windows versions.
+        # Poll the output directory for up to 30 seconds.
+        output_path = Path(safe_output)
+        for attempt in range(30):
+            if output_path.exists() and any(output_path.iterdir()):
+                return True
+            time.sleep(1)
+
         logger.warning('hh.exe produced empty output for: %s', chm_path)
         return False
     except FileNotFoundError:
@@ -136,6 +164,67 @@ def _extract_chm_7z(chm_path: str, output_dir: str) -> bool:
     return False
 
 
+def _extract_chm_pychm(chm_path: str, output_dir: str) -> bool:
+    """Pure-Python CHM extraction using pychm library.
+
+    This is the last-resort fallback when neither hh.exe nor 7z is available.
+    Requires: pip install pychm
+    """
+    try:
+        from chm.chm import CHMFile as _CHMFile  # type: ignore
+    except ImportError:
+        logger.debug("pychm not installed, skipping")
+        return False
+
+    try:
+        safe_chm = _sanitize_path(chm_path)
+        safe_output = _sanitize_path(output_dir)
+        Path(safe_output).mkdir(parents=True, exist_ok=True)
+
+        chm = _CHMFile(safe_chm)
+
+        extracted = 0
+
+        def _visitor(chm_file, ui, context, entry):
+            nonlocal extracted
+            path = entry.path
+            # Skip directories and special CHM internal files
+            if not path or path.endswith("/") or path.startswith("/#") or path.startswith("::"):
+                return True
+
+            # Clean leading slashes/backslashes
+            clean = path.lstrip("/\\")
+            if not clean:
+                return True
+
+            out_path = Path(safe_output) / clean
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+
+            try:
+                data = chm_file.retrieve_file(entry)
+                if data:
+                    out_path.write_bytes(data)
+                    extracted += 1
+            except Exception as e:
+                logger.debug("pychm failed to extract %s: %s", path, e)
+
+            return True
+
+        chm.chm.chm_resolve_object("/")
+        chm.chm.chm_walk(_visitor)
+
+        if extracted > 0:
+            logger.info("pychm extracted %d files from CHM", extracted)
+            return True
+
+        logger.warning("pychm extracted 0 files from: %s", chm_path)
+        return False
+
+    except Exception as e:
+        logger.debug("pychm extraction failed: %s", e)
+        return False
+
+
 def _extract_chm(chm_path: str, output_dir: str) -> bool:
     """
     解压 CHM 文件，按优先级尝试多种工具：
@@ -164,10 +253,18 @@ def _extract_chm(chm_path: str, output_dir: str) -> bool:
         logger.info("7z 解压成功")
         return True
 
+    # Last resort: Python-native CHM extraction via pychm
+    logger.info("尝试使用 pychm 纯 Python 解压 CHM...")
+    if _extract_chm_pychm(chm_path, output_dir):
+        logger.info("pychm 解压成功")
+        return True
+
     logger.error(
-        "CHM 解压失败：未找到可用的解压工具。"
-        "Windows 用户无需额外操作（hh.exe 应该自带）；"
-        "Linux 用户请安装 p7zip-full。"
+        "CHM 解压失败：所有方法均不可用。\n"
+        "请尝试以下任一方案：\n"
+        "  1. 安装 7-Zip (https://7-zip.org)\n"
+        "  2. pip install pychm\n"
+        "  3. 确认 hh.exe 未被安全策略阻止"
     )
     return False
 

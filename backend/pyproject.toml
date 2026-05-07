@@ -20,7 +20,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "kuzu>=0.3.0",
     "sentence-transformers>=2.0.0",
-]
+    "pychm>=0.8.4; sys_platform == \"win32\"",
 
 [build-system]
 requires = ["hatchling"]
