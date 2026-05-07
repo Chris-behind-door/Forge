@@ -72,8 +72,13 @@ def _extract_chm_hh(chm_path: str, output_dir: str) -> bool:
     try:
         safe_chm = _sanitize_path(chm_path)
         safe_output = _sanitize_path(output_dir)
-        # Ensure output dir exists
-        Path(safe_output).mkdir(parents=True, exist_ok=True)
+
+        # hh.exe -decompile creates the output dir itself.
+        # If it already exists, hh.exe silently does nothing.
+        # Remove it if leftover from a previous attempt.
+        if Path(safe_output).exists():
+            shutil.rmtree(safe_output, ignore_errors=True)
+
         # Try multiple hh.exe locations (Win10/11 may differ)
         hh_candidates = [
             str(Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'hh.exe'),
