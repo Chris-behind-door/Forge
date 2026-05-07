@@ -198,20 +198,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $tag = "v$(Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version"
-          Write-Host "Looking for release with tag: $tag"
+          # Read version from tauri.conf.json
+          $tauriConf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $tag = "v$($tauriConf.version)"
+          Write-Host "Uploading model assets to release with tag: $tag"
 
-          # Find the draft release
-          $releases = gh release list --limit 5 --json tagName,isDraft,id --jq '.[] | select(.tagName == "'$tag'")'
-          if (-not $releases) {
-            Write-Host "No release found for tag $tag, skipping model upload"
-            return
-          }
-          $releaseId = ($releases | ConvertFrom-Json).id
-          if (-not $releaseId) {
-            $releaseId = (gh release list --limit 5 --json tagName,isDraft,id | ConvertFrom-Json | Where-Object { $_.tagName -eq $tag }).id
-          }
-
-          Write-Host "Uploading model assets to release $releaseId"
           gh release upload $tag backend/embedding-model.zip backend/reranker-model.zip --clobber
           Write-Host "Done"
