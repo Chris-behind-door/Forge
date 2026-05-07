@@ -39,6 +39,7 @@ jobs:
           .\.venv\Scripts\activate
           uv pip install -e ".[dev]"
           uv pip install pyinstaller
+          uv pip install pychm
 
       - name: Pre-download embedding model
         working-directory: backend
@@ -144,6 +145,8 @@ jobs:
             --hidden-import src.parsers `
             --hidden-import src.parsers.pdf `
             --hidden-import src.parsers.chm `
+            --hidden-import chm `
+            --hidden-import chm.chm `
             --hidden-import src.models `
             --hidden-import src.models.session `
             --hidden-import src.utils `
