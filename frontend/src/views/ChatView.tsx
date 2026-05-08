@@ -56,14 +56,16 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
     return () => { unlisten.then((fn) => fn()) }
   }, [])
 
+  // Track whether we're in the middle of sending (prevent sessionId effect from wiping)
+  const [sendingMessage, setSendingMessage] = useState(false)
+
   // Load session messages when sessionId changes
-  // Skip when loading (sending a message) to avoid wiping local state
   useEffect(() => {
     if (!sessionId) {
       setMessages([])
       return
     }
-    if (loading) return // Don't overwrite messages while a query is in flight
+    if (sendingMessage) return // Don't overwrite messages while a query is in flight
     ;(async () => {
       try {
         const res = await fetch(`${getApiBase()}/sessions/${sessionId}`)
@@ -82,7 +84,7 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
         }
       } catch { /* ignore */ }
     })()
-  }, [sessionId, loading])
+  }, [sessionId, sendingMessage])
 
   /** 点击内联引用标签的处理 — 在浏览器中打开原文位置 */
   const handleCitationClick = useCallback(async (c: Citation) => {
@@ -120,6 +122,7 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
     const loadingMsg: Message = { id: nextMessageId(), role: 'loading', content: '正在检索知识库...' }
     setMessages((prev) => [...prev, userMsg, loadingMsg])
     setInput('')
+    setSendingMessage(true)
     setLoading(true)
 
     try {
@@ -165,6 +168,7 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
       setMessages((prev) => [...prev.slice(0, -1), errorMsg])
     } finally {
       setLoading(false)
+      setSendingMessage(false)
     }
   }, [input, ipcToken, sessionId, selectedProjectId, onNewChat])
 

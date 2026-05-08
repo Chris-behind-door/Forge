@@ -161,7 +161,7 @@ async def delete_project(project_id: str) -> dict:
         json.dump(resolutions_data, f, indent=2, ensure_ascii=False)
 
     # Cascade 2: delete all documents in this project
-    from ..routers.documents import _load_metadata, _cancel_processing, _save_metadata
+    from ..services.document_service import _load_metadata, cancel_processing as _cancel_processing, _save_metadata
     from ..rag.vector_store import delete_doc_chunks
 
     metadata = _load_metadata()

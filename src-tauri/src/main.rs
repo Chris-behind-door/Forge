@@ -96,7 +96,7 @@ fn main() {
                             .env("FORGE_PORT", backend_port.to_string())
                             .spawn()
                         {
-                            Ok((mut rx, child)) => {
+                            Ok((rx, child)) => {
                                 println!("[Forge] Backend sidecar started (PID: {:?})", child.pid());
                                 spawn_output_reader(rx);
                                 true
