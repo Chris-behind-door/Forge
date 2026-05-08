@@ -11,7 +11,6 @@ Cross-encoder Reranker 模块
 import logging
 import os
 import threading
-from pathlib import Path
 
 import torch
 
@@ -93,7 +92,6 @@ def _load_reranker():
                 return _reranker_model, _reranker_tokenizer
 
             # 2. Try offline cache
-            saved_endpoint = os.environ.get("HF_ENDPOINT", "")
             try:
                 os.environ["HF_HUB_OFFLINE"] = "1"
                 tokenizer = AutoTokenizer.from_pretrained(RERANKER_MODEL, local_files_only=True)

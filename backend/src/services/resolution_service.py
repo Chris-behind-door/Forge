@@ -5,7 +5,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from ..graph import queries as gq
-from ..graph.extract import extract_resolutions, find_and_create_links
+from ..graph.extract import find_and_create_links
 from ..models.meeting import Resolution, ResolutionCreate, ResolutionUpdate
 from ..rag.embeddings import embed_texts
 from ..resolution_store import load_resolutions, save_resolutions

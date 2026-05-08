@@ -97,7 +97,7 @@ def _extract_chm_hh(chm_path: str, output_dir: str) -> bool:
         _unblock_file_windows(safe_chm)
 
         logger.info('Using hh.exe: %s', hh_exe)
-        result = subprocess.run(
+        subprocess.run(
             [hh_exe, '-decompile', safe_output, safe_chm],
             capture_output=True,
             text=True,

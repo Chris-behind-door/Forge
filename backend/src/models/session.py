@@ -4,8 +4,9 @@ import json
 import sqlite3
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
+
+from contextlib import contextmanager
 
 from ..utils.paths import DATA_DIR as DB_DIR
 DB_PATH = DB_DIR / "sessions.db"
@@ -29,9 +30,6 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 """
-
-
-from contextlib import contextmanager
 
 
 @contextmanager

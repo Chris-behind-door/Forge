@@ -76,6 +76,20 @@ app.include_router(projects_router)
 app.include_router(meetings_router)
 
 
+# Suppress noisy NameError during interpreter shutdown
+# (fastembed/lancedb __del__ accessing cleaned-up globals)
+import sys as _sys  # noqa: E402
+_original_excepthook = _sys.excepthook
+
+def _quiet_shutdown_hook(exc_type, exc_val, exc_tb):
+    if exc_type is NameError and _sys.meta_path is None:
+        # Interpreter is shutting down, suppress harmless NameError
+        return
+    _original_excepthook(exc_type, exc_val, exc_tb)
+
+_sys.excepthook = _quiet_shutdown_hook
+
+
 @app.on_event("startup")
 async def on_startup():
     """应用启动时：检查 schema 版本，恢复未完成的文档处理"""
@@ -177,7 +191,7 @@ async def query(request: QueryRequest) -> QueryResponse:
         from fastapi import HTTPException
 
         raise HTTPException(status_code=403, detail=str(e))
-    except Exception as e:
+    except Exception:
         logger.exception("Agent query failed")
         if request.session_id:
             from .models.session import save_message as _save

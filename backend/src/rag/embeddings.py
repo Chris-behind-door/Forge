@@ -5,9 +5,7 @@ Uses fastembed with bge-small-zh for Chinese text.
 
 import logging
 import os
-import sys
 import threading
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
