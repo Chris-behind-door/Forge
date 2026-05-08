@@ -244,13 +244,12 @@ def _extract_chm(chm_path: str, output_dir: str) -> bool:
     Returns:
         是否成功
     """
-    # Windows: prefer built-in hh.exe
-    if sys.platform == "win32":
-        logger.info("尝试使用 hh.exe 反编译 CHM...")
-        if _extract_chm_hh(chm_path, output_dir):
-            logger.info("hh.exe 反编译成功")
-            return True
-        logger.warning("hh.exe 失败，回退到 7z...")
+    # Try pychm first (pure Python, most reliable across platforms)
+    logger.info("尝试使用 pychm 解压 CHM...")
+    if _extract_chm_pychm(chm_path, output_dir):
+        logger.info("pychm 解压成功")
+        return True
+    logger.warning("pychm 失败，回退到其他方法...")
 
     # Try 7z (works everywhere if installed)
     logger.info("尝试使用 7z 解压 CHM...")
@@ -258,11 +257,12 @@ def _extract_chm(chm_path: str, output_dir: str) -> bool:
         logger.info("7z 解压成功")
         return True
 
-    # Last resort: Python-native CHM extraction via pychm
-    logger.info("尝试使用 pychm 纯 Python 解压 CHM...")
-    if _extract_chm_pychm(chm_path, output_dir):
-        logger.info("pychm 解压成功")
-        return True
+    # Windows fallback: hh.exe (unreliable on modern Windows)
+    if sys.platform == "win32":
+        logger.info("尝试使用 hh.exe 反编译 CHM（不保证成功）...")
+        if _extract_chm_hh(chm_path, output_dir):
+            logger.info("hh.exe 反编译成功")
+            return True
 
     logger.error(
         "CHM 解压失败：所有方法均不可用。\n"

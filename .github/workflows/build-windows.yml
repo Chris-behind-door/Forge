@@ -123,6 +123,8 @@ jobs:
             --collect-all langchain_text_splitters `
             --collect-all llama_index `
             --collect-all llama_index_workflows `
+            --collect-all chm `
+            --hidden-import chm.chm `
             --hidden-import uvicorn.logging `
             --hidden-import uvicorn.loops `
             --hidden-import uvicorn.loops.auto `
