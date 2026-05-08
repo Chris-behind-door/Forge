@@ -14,7 +14,7 @@ from ..services.resolution_service import batch_create_and_link, clear_for_meeti
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path.home() / ".engineer_assistant" / "data"
+from ..utils.paths import DATA_DIR  # noqa: E402
 MEETINGS_FILE = DATA_DIR / "meetings.json"
 
 _SUPPORTED_EXTENSIONS = {".pdf", ".txt", ".md", ".doc", ".docx"}
@@ -235,7 +235,7 @@ async def import_meeting(
     )
 
     # Save file to staging for later processing (survives restarts)
-    staging_dir = Path.home() / ".engineer_assistant" / "data" / "import_staging"
+    staging_dir = DATA_DIR / "import_staging"
     staging_dir.mkdir(parents=True, exist_ok=True)
     tmp_path = staging_dir / f"{meeting.id}{suffix}"
     tmp_path.write_bytes(file_content)

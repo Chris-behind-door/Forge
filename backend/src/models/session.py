@@ -38,6 +38,7 @@ def _get_conn():
     conn = sqlite3.connect(str(DB_PATH))
     try:
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.row_factory = sqlite3.Row
         conn.executescript(_SCHEMA)

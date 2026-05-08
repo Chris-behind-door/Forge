@@ -354,17 +354,17 @@ def get_chunk_detail(doc_id: str, chunk_index: int) -> ChunkDetail:
 
     table = db.open_table(CHUNKS_TABLE)
     target_chunk_id = f"{doc_id}_{chunk_index}"
-    safe_doc_id = doc_id.replace("'", "''")
+    safe_chunk_id = target_chunk_id.replace("'", "''")
     rows = (
-        table.search().where(f"doc_id = '{safe_doc_id}'")
-        .limit(50000).to_pydantic(ChunkRecord)
+        table.search().where(f"chunk_id = '{safe_chunk_id}'")
+        .limit(1).to_pydantic(ChunkRecord)
     )
 
-    for r in rows:
-        if r.chunk_id == target_chunk_id:
-            return ChunkDetail(
-                chunk_id=r.chunk_id, doc_id=r.doc_id, text=r.text,
-                page=r.page, location=r.location, index=chunk_index,
-                doc_name=doc.name, file_type=doc.file_type,
-            )
+    if rows:
+        r = rows[0]
+        return ChunkDetail(
+            chunk_id=r.chunk_id, doc_id=r.doc_id, text=r.text,
+            page=r.page, location=r.location, index=chunk_index,
+            doc_name=doc.name, file_type=doc.file_type,
+        )
     raise HTTPException(status_code=404, detail=f"Chunk 不存在: {target_chunk_id}")

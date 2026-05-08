@@ -142,7 +142,8 @@ def delete_doc_chunks(doc_id: str) -> int:
     table = db.open_table(CHUNKS_TABLE)
     count_before = table.count_rows()
 
-    table.delete(f"doc_id = '{doc_id}'")
+    safe_doc_id = doc_id.replace("'", "''")
+    table.delete(f"doc_id = '{safe_doc_id}'")
 
     count_after = table.count_rows()
 
@@ -358,7 +359,8 @@ def get_chunk_count(doc_id: str | None = None) -> int:
     table = db.open_table(CHUNKS_TABLE)
 
     if doc_id:
-        results = table.search().where(f"doc_id = '{doc_id}'").limit(10000).to_list()
+        safe_doc_id = doc_id.replace("'", "''")
+        results = table.search().where(f"doc_id = '{safe_doc_id}'").limit(10000).to_list()
         return len(results)
 
     return table.count_rows()

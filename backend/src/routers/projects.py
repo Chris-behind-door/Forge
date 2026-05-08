@@ -5,18 +5,19 @@ Project CRUD API routes.
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
 
 from ..models.project import Project, ProjectCreate, ProjectDetail, ProjectUpdate
+from ..utils.paths import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
-DATA_DIR = Path.home() / ".engineer_assistant" / "data"
+from pathlib import Path  # noqa: E402
+
 PROJECTS_FILE = DATA_DIR / "projects.json"
 MEETINGS_FILE = DATA_DIR / "meetings.json"
 RESOLUTIONS_FILE = DATA_DIR / "resolutions.json"

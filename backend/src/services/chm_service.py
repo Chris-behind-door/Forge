@@ -32,7 +32,7 @@ def get_chm_html(doc_id: str, path: str):
 
     clean_path = path.split("?")[0]
     file_path = (extract_dir / clean_path).resolve()
-    if not str(file_path).startswith(str(extract_dir.resolve())):
+    if not file_path.is_relative_to(extract_dir.resolve()):
         raise HTTPException(status_code=403, detail="非法路径")
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"文件不存在: {clean_path}")
@@ -72,7 +72,7 @@ def get_chm_static(doc_id: str, subpath: str):
         raise HTTPException(status_code=404, detail=f"文件不存在: {subpath}")
 
     file_path = candidates[0].resolve()
-    if not str(file_path).startswith(str(extract_dir.resolve())):
+    if not file_path.is_relative_to(extract_dir.resolve()):
         raise HTTPException(status_code=403, detail="非法路径")
 
     mime_type, _ = mimetypes.guess_type(str(file_path))
