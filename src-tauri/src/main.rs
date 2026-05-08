@@ -18,7 +18,6 @@ fn find_available_port(base_port: u16, max_tries: u16) -> Option<u16> {
     })
 }
 
-#[cfg(not(debug_assertions))]
 fn spawn_output_reader(mut rx: tauri::async_runtime::Receiver<tauri_plugin_shell::process::CommandEvent>) {
     use tauri_plugin_shell::process::CommandEvent;
     std::thread::spawn(move || {
