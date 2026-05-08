@@ -13,6 +13,7 @@
 """
 
 import logging
+import os
 from typing import Any
 
 import lancedb
@@ -237,8 +238,12 @@ def search_similar(
             }
         )
 
-    # 第二阶段：CrossEncoder 精排
+    # 第二阶段：CrossEncoder 精排（可通过环境变量 FORGE_DISABLE_RERANKER=1 禁用）
     rerank_input = candidates[: top_k * 2]
+    disable_reranker = os.environ.get("FORGE_DISABLE_RERANKER", "").strip().lower() in ("1", "true", "yes")
+    if disable_reranker:
+        logger.info("Reranker disabled by config, using hybrid scores")
+        return candidates[:top_k]
     try:
         reranker_fn = make_reranker_fn(top_k=top_k)
         texts = [c["text"] for c in rerank_input]
