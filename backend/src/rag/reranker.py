@@ -1,15 +1,19 @@
 """
 Cross-encoder Reranker 模块
 
-使用 sentence-transformers CrossEncoder 加载 bge-reranker-v2-m3。
+使用 transformers 原生 AutoModelForSequenceClassification 加载 bge-reranker-v2-m3。
 延迟加载：首次调用时才加载模型。
-支持离线模型包 + 镜像源回退。
+支持离线模型包 + HF cache + 镜像源回退。
+
+注：不用 sentence_transformers.CrossEncoder（5.x 版本 OOM 问题严重）。
 """
 
 import logging
 import os
 import threading
 from pathlib import Path
+
+import torch
 
 from ..utils.paths import VECTOR_DIR
 from .bundled_models import extract_bundled_zip
@@ -30,28 +34,44 @@ _RERANKER_MODEL_DIR = "reranker"  # flat directory, not HF cache format
 # Cache directory (shared with embedding)
 CACHE_DIR = VECTOR_DIR / "cache"
 
+MAX_LENGTH = 512
+
 _lock = threading.Lock()
 _reranker_model = None
+_reranker_tokenizer = None
 _load_error: Exception | None = None
 
 
+def _detect_device() -> str:
+    """检测最佳推理设备"""
+    if torch.cuda.is_available():
+        device = "cuda:0"
+        logger.info("Reranker 使用 GPU: %s", torch.cuda.get_device_name(0))
+        return device
+    logger.info("Reranker 使用 CPU")
+    return "cpu"
+
+
 def _load_reranker():
-    """延迟加载 reranker 模型（线程安全）"""
-    global _reranker_model, _load_error
+    """延迟加载 reranker 模型和 tokenizer（线程安全）"""
+    global _reranker_model, _reranker_tokenizer, _load_error
 
     if _reranker_model is not None:
-        return _reranker_model
+        return _reranker_model, _reranker_tokenizer
     # Allow retries
     _load_error = None
 
     with _lock:
         if _reranker_model is not None:
-            return _reranker_model
+            return _reranker_model, _reranker_tokenizer
 
         try:
-            from sentence_transformers import CrossEncoder
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
             logger.info("正在加载 Reranker 模型 %s ...", RERANKER_MODEL)
+
+            # Detect device
+            device = _detect_device()
 
             # 1. Try bundled model (local path)
             snapshot_path = extract_bundled_zip(
@@ -62,19 +82,29 @@ def _load_reranker():
             )
             if snapshot_path:
                 logger.info("使用离线 Reranker 模型: %s", snapshot_path)
-                model = CrossEncoder(str(snapshot_path), max_length=512, local_files_only=True)
-                logger.info("离线 Reranker 模型加载完成")
+                tokenizer = AutoTokenizer.from_pretrained(str(snapshot_path), local_files_only=True)
+                model = AutoModelForSequenceClassification.from_pretrained(
+                    str(snapshot_path), local_files_only=True,
+                )
+                model.to(device).eval()
+                logger.info("离线 Reranker 模型加载完成 (device=%s)", device)
                 _reranker_model = model
-                return _reranker_model
+                _reranker_tokenizer = tokenizer
+                return _reranker_model, _reranker_tokenizer
 
             # 2. Try offline cache
             saved_endpoint = os.environ.get("HF_ENDPOINT", "")
             try:
                 os.environ["HF_HUB_OFFLINE"] = "1"
-                model = CrossEncoder(RERANKER_MODEL, max_length=512)
-                logger.info("Reranker 模型从本地缓存加载完成")
+                tokenizer = AutoTokenizer.from_pretrained(RERANKER_MODEL, local_files_only=True)
+                model = AutoModelForSequenceClassification.from_pretrained(
+                    RERANKER_MODEL, local_files_only=True,
+                )
+                model.to(device).eval()
+                logger.info("Reranker 模型从本地缓存加载完成 (device=%s)", device)
                 _reranker_model = model
-                return _reranker_model
+                _reranker_tokenizer = tokenizer
+                return _reranker_model, _reranker_tokenizer
             except Exception:
                 logger.info("本地无 Reranker 模型缓存")
             finally:
@@ -89,10 +119,13 @@ def _load_reranker():
             for mirror in mirrors:
                 os.environ["HF_ENDPOINT"] = mirror
                 try:
-                    model = CrossEncoder(RERANKER_MODEL, max_length=512)
-                    logger.info("Reranker 模型从 %s 加载完成", mirror)
+                    tokenizer = AutoTokenizer.from_pretrained(RERANKER_MODEL)
+                    model = AutoModelForSequenceClassification.from_pretrained(RERANKER_MODEL)
+                    model.to(device).eval()
+                    logger.info("Reranker 模型从 %s 加载完成 (device=%s)", mirror, device)
                     _reranker_model = model
-                    return _reranker_model
+                    _reranker_tokenizer = tokenizer
+                    return _reranker_model, _reranker_tokenizer
                 except Exception as e:
                     logger.debug("从 %s 加载 reranker 失败: %s", mirror, e)
                     last_err = e
@@ -125,10 +158,26 @@ def rerank(query: str, texts: list[str], top_k: int | None = None) -> list[float
     if not texts:
         return []
 
-    model = _load_reranker()
+    model, tokenizer = _load_reranker()
+    device = next(model.parameters()).device
 
     pairs = [[query, t] for t in texts]
-    scores = model.predict(pairs).tolist()
+    features = tokenizer(
+        pairs,
+        padding=True,
+        truncation=True,
+        max_length=MAX_LENGTH,
+        return_tensors="pt",
+    )
+    features = {k: v.to(device) for k, v in features.items()}
+
+    with torch.inference_mode():
+        logits = model(**features).logits.squeeze(-1)
+
+    scores = logits.tolist()
+    # Ensure list (single-item tensor -> float)
+    if isinstance(scores, float):
+        scores = [scores]
 
     if top_k is not None and top_k < len(scores):
         indexed = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
