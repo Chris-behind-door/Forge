@@ -59,20 +59,30 @@ jobs:
         run: |
           .\.venv\Scripts\activate
           python -c "
-          import os
+          import os, zipfile
           os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
           from pathlib import Path
+          from huggingface_hub import snapshot_download
+
+          # Download in HF cache format (snapshots/<hash>/...)
           cache_dir = Path('model-cache')
           cache_dir.mkdir(parents=True, exist_ok=True)
-          from fastembed import TextEmbedding
-          print('Downloading embedding model...')
-          model = TextEmbedding('BAAI/bge-small-zh-v1.5', cache_dir=str(cache_dir))
-          list(model.embed(['test']))
-          print('Model downloaded successfully')
-          "
+          snapshot_download(
+              'Qdrant/bge-small-zh-v1.5',
+              cache_dir=str(cache_dir),
+          )
+          print('Model downloaded')
 
-          Compress-Archive -Path model-cache\* -DestinationPath embedding-model.zip
-          Write-Host "Model archive created"
+          # Pack into zip preserving HF cache structure
+          model_dir = cache_dir / 'models--Qdrant--bge-small-zh-v1.5'
+          with zipfile.ZipFile('embedding-model.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
+              for f in sorted(model_dir.rglob('*')):
+                  if f.is_file():
+                      zf.write(f, f.relative_to(cache_dir))
+          import os as _os
+          size_mb = _os.path.getsize('embedding-model.zip') / 1024 / 1024
+          print(f'Created embedding-model.zip ({size_mb:.0f} MB)')
+          "
 
       - name: Pre-download reranker model
         working-directory: backend

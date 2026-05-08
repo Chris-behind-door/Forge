@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-DB_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+from ..utils.paths import DATA_DIR as DB_DIR
 DB_PATH = DB_DIR / "sessions.db"
 
 _SCHEMA = """
