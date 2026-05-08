@@ -11,7 +11,7 @@
  * - Enter 发送消息
  * - Shift+Enter 换行
  */
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Input, Button, Card, Spin, message, Select } from 'antd'
 import { SendOutlined, PlusOutlined } from '@ant-design/icons'
 import { open } from '@tauri-apps/plugin-shell'
@@ -57,15 +57,15 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
   }, [])
 
   // Track whether we're in the middle of sending (prevent sessionId effect from wiping)
-  const [sendingMessage, setSendingMessage] = useState(false)
+  const sendingRef = useRef(false)
 
-  // Load session messages when sessionId changes
+  // Load session messages when sessionId changes (but NOT during send)
   useEffect(() => {
     if (!sessionId) {
       setMessages([])
       return
     }
-    if (sendingMessage) return // Don't overwrite messages while a query is in flight
+    if (sendingRef.current) return // Don't overwrite messages while a query is in flight
     ;(async () => {
       try {
         const res = await fetch(`${getApiBase()}/sessions/${sessionId}`)
@@ -84,7 +84,7 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
         }
       } catch { /* ignore */ }
     })()
-  }, [sessionId, sendingMessage])
+  }, [sessionId])
 
   /** 点击内联引用标签的处理 — 在浏览器中打开原文位置 */
   const handleCitationClick = useCallback(async (c: Citation) => {
@@ -122,7 +122,7 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
     const loadingMsg: Message = { id: nextMessageId(), role: 'loading', content: '正在检索知识库...' }
     setMessages((prev) => [...prev, userMsg, loadingMsg])
     setInput('')
-    setSendingMessage(true)
+    sendingRef.current = true
     setLoading(true)
 
     try {
@@ -168,7 +168,7 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
       setMessages((prev) => [...prev.slice(0, -1), errorMsg])
     } finally {
       setLoading(false)
-      setSendingMessage(false)
+      sendingRef.current = false
     }
   }, [input, ipcToken, sessionId, selectedProjectId, onNewChat])
 
