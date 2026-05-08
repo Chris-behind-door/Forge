@@ -57,11 +57,13 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
   }, [])
 
   // Load session messages when sessionId changes
+  // Skip when loading (sending a message) to avoid wiping local state
   useEffect(() => {
     if (!sessionId) {
       setMessages([])
       return
     }
+    if (loading) return // Don't overwrite messages while a query is in flight
     ;(async () => {
       try {
         const res = await fetch(`${getApiBase()}/sessions/${sessionId}`)
@@ -80,7 +82,7 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
         }
       } catch { /* ignore */ }
     })()
-  }, [sessionId])
+  }, [sessionId, loading])
 
   /** 点击内联引用标签的处理 — 在浏览器中打开原文位置 */
   const handleCitationClick = useCallback(async (c: Citation) => {
