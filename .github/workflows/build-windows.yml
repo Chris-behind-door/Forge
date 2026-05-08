@@ -33,11 +33,22 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install 7-Zip (CHM fallback)
+      - name: Download 7-Zip standalone (for CHM extraction)
         shell: pwsh
         run: |
+          Invoke-WebRequest -Uri "https://www.7-zip.org/a/7z2409-extra.7z" -OutFile 7z-extra.7z
           choco install 7zip -y
-          Write-Host "7z installed: $(7z | Select-String '7-Zip')"
+          7z x 7z-extra.7z -o7z-extra -y
+          # Keep both ia64 (64-bit) and standard 7z.exe
+          mkdir -Force backend/bundled_tools
+          if (Test-Path 7z-extra/x64/7z.exe) {
+            Copy-Item 7z-extra/x64/7z.exe backend/bundled_tools/
+            Copy-Item 7z-extra/x64/7z.dll backend/bundled_tools/
+          } elseif (Test-Path 7z-extra/7z.exe) {
+            Copy-Item 7z-extra/7z.exe backend/bundled_tools/
+            Copy-Item 7z-extra/7z.dll backend/bundled_tools/
+          }
+          Write-Host "Bundled 7z: $(Get-ChildItem backend/bundled_tools/)"
 
       - name: Build Python sidecar
         working-directory: backend
@@ -123,8 +134,6 @@ jobs:
             --collect-all langchain_text_splitters `
             --collect-all llama_index `
             --collect-all llama_index_workflows `
-            --collect-all chm `
-            --hidden-import chm.chm `
             --hidden-import uvicorn.logging `
             --hidden-import uvicorn.loops `
             --hidden-import uvicorn.loops.auto `
@@ -168,6 +177,7 @@ jobs:
             --hidden-import pydantic `
             --hidden-import llama_index.core.workflow `
             --hidden-import langchain_text_splitters `
+            --add-data "bundled_tools;bundled_tools" `
             run.py
 
           New-Item -ItemType Directory -Force -Path ..\src-tauri\binaries

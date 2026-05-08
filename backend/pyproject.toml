@@ -19,8 +19,7 @@ dependencies = [
     "pyinstaller>=6.19.0",
     "python-dotenv>=1.2.2",
     "kuzu>=0.3.0",
-    "sentence-transformers>=2.0.0",
-    "pychm>=0.8.5"
+    "sentence-transformers>=2.0.0"
 ]
 
 [build-system]

@@ -133,7 +133,17 @@ def _extract_chm_7z(chm_path: str, output_dir: str) -> bool:
 
     candidates = []
 
-    # 7z (standalone or p7zip)
+    # Bundled 7z (shipped with the app in bundled_tools/)
+    if getattr(sys, '_MEIPASS', None):
+        # Running as PyInstaller bundle
+        bundled = Path(sys._MEIPASS) / 'bundled_tools' / '7z.exe'
+    else:
+        # Running as plain Python
+        bundled = Path(__file__).resolve().parent.parent.parent / 'bundled_tools' / '7z.exe'
+    if bundled.exists():
+        candidates.insert(0, ("bundled 7z", [str(bundled), "x", "-y", f"-o{safe_output}", safe_chm]))
+
+    # System 7z (standalone or p7zip)
     if shutil.which("7z"):
         candidates.append(("7z", ["7z", "x", "-y", f"-o{safe_output}", safe_chm]))
     if sys.platform == "win32":
@@ -244,25 +254,24 @@ def _extract_chm(chm_path: str, output_dir: str) -> bool:
     Returns:
         是否成功
     """
-    # Try pychm first (pure Python, most reliable across platforms)
-    logger.info("尝试使用 pychm 解压 CHM...")
-    if _extract_chm_pychm(chm_path, output_dir):
-        logger.info("pychm 解压成功")
-        return True
-    logger.warning("pychm 失败，回退到其他方法...")
-
-    # Try 7z (works everywhere if installed)
+    # Try bundled 7z first (shipped with the app)
     logger.info("尝试使用 7z 解压 CHM...")
     if _extract_chm_7z(chm_path, output_dir):
         logger.info("7z 解压成功")
         return True
 
-    # Windows fallback: hh.exe (unreliable on modern Windows)
+    # Windows: try hh.exe (unreliable on modern Windows, but worth trying)
     if sys.platform == "win32":
-        logger.info("尝试使用 hh.exe 反编译 CHM（不保证成功）...")
+        logger.info("尝试使用 hh.exe 反编译 CHM...")
         if _extract_chm_hh(chm_path, output_dir):
             logger.info("hh.exe 反编译成功")
             return True
+
+    # Last resort: pychm (if installed)
+    logger.info("尝试使用 pychm 解压 CHM...")
+    if _extract_chm_pychm(chm_path, output_dir):
+        logger.info("pychm 解压成功")
+        return True
 
     logger.error(
         "CHM 解压失败：所有方法均不可用。\n"
