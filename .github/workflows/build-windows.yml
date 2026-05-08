@@ -33,21 +33,13 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Download 7-Zip standalone (for CHM extraction)
+      - name: Bundle 7-Zip for CHM extraction
         shell: pwsh
         run: |
           choco install 7zip -y
-          Invoke-WebRequest -Uri "https://github.com/ip7z/7zip/releases/download/26.01/7z2601-extra.7z" -OutFile 7z-extra.7z
-          7z x 7z-extra.7z -o7z-extra -y
           mkdir -Force backend/bundled_tools
-          # x64 is the native subfolder in extra archive
-          if (Test-Path 7z-extra/x64) {
-            Copy-Item 7z-extra/x64/7z.exe backend/bundled_tools/
-            Copy-Item 7z-extra/x64/7z.dll backend/bundled_tools/
-          } else {
-            Copy-Item 7z-extra/7z.exe backend/bundled_tools/
-            Copy-Item 7z-extra/7z.dll backend/bundled_tools/
-          }
+          Copy-Item 'C:\Program Files\7-Zip\7z.exe' backend/bundled_tools/
+          Copy-Item 'C:\Program Files\7-Zip\7z.dll' backend/bundled_tools/
           Write-Host "Bundled 7z:"
           Get-ChildItem backend/bundled_tools/ | ForEach-Object { Write-Host "  $($_.Name) ($([math]::Round($_.Length/1KB))KB)" }
 
