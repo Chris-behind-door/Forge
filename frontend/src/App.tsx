@@ -127,9 +127,9 @@ function App() {
     if (isTauri) {
       try {
         const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
-        const existing = WebviewWindow.getByLabel('api-guide')
+        const existing = await WebviewWindow.getByLabel('api-guide')
         if (existing) {
-          existing.setFocus()
+          await existing.setFocus()
         } else {
           new WebviewWindow('api-guide', {
             url: '/docs/api-guide/index.html',
