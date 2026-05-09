@@ -5,6 +5,8 @@
   "windows": ["main", "api-guide"],
   "permissions": [
     "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-create",
     "shell:allow-open",
     {
       "identifier": "shell:allow-spawn",
