@@ -35,12 +35,22 @@ def extract_bundled_zip(
         Path to the directory containing model_file, or None.
     """
     target_dir = cache_dir / model_dir_name
+    logger.info("[DEBUG] target_dir = %s", target_dir)
+    logger.info("[DEBUG] target_dir exists = %s", target_dir.exists())
 
     # Check if already extracted and valid
     existing = _find_model_file(target_dir, model_file)
     if existing:
         logger.info("模型已存在: %s", existing.parent)
         return existing.parent
+    else:
+        logger.info("[DEBUG] _find_model_file returned None for %s in %s", model_file, target_dir)
+        if target_dir.exists():
+            # List what's actually there
+            logger.info("[DEBUG] target_dir contents:")
+            for p in sorted(target_dir.rglob("*"))[:30]:
+                size = p.stat().st_size if p.is_file() else "DIR"
+                logger.info("[DEBUG]   %s (%s)", p.relative_to(target_dir), size)
 
     # Clean up any incomplete extraction
     if target_dir.exists():
@@ -56,11 +66,16 @@ def extract_bundled_zip(
     else:
         candidates.append(Path(__file__).parent.parent.parent / zip_name)
 
+    logger.info("[DEBUG] Looking for zip '%s', candidates:", zip_name)
+    for c in candidates:
+        logger.info("[DEBUG]   %s -> exists=%s", c, c.exists())
+
     for zip_path in candidates:
         if not zip_path.exists():
             continue
 
         logger.info("发现离线模型包: %s，正在解压...", zip_path)
+        logger.info("[DEBUG] zip size = %s bytes", zip_path.stat().st_size)
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
             with zipfile.ZipFile(zip_path, "r") as zf:
@@ -98,8 +113,13 @@ def extract_bundled_zip(
                             shutil.copyfileobj(src, dst)
 
             logger.info("离线模型包解压完成")
+            logger.info("[DEBUG] Post-extract target_dir contents:")
+            for p in sorted(target_dir.rglob("*"))[:30]:
+                size = p.stat().st_size if p.is_file() else "DIR"
+                logger.info("[DEBUG]   %s (%s)", p.relative_to(target_dir), size)
 
             found = _find_model_file(target_dir, model_file)
+            logger.info("[DEBUG] _find_model_file post-extract: %s", found)
             if found:
                 logger.info("模型目录: %s", found.parent)
                 logger.info(
