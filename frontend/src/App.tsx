@@ -190,7 +190,9 @@ function App() {
 
       <Layout className="main-layout">
         <Content className="main-content">
-          {currentView === 'chat' && <ChatView sessionId={sessionId} onNewChat={handleNewChat} />}
+          <div style={{ display: currentView === 'chat' ? undefined : 'none' }}>
+            <ChatView sessionId={sessionId} onNewChat={handleNewChat} />
+          </div>
           {currentView === 'knowledge' && <KnowledgeBaseView />}
           {currentView === 'meetings' && <MeetingsView />}
           {currentView === 'config' && <ConfigView />}
