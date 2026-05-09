@@ -125,7 +125,22 @@ function App() {
   const openApiGuide = useCallback(async () => {
     const isTauri = !!(window as any).__TAURI_INTERNALS__
     if (isTauri) {
-      window.open('/docs/api-guide/index.html', '_blank')
+      try {
+        const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+        const existing = WebviewWindow.getByLabel('api-guide')
+        if (existing) {
+          existing.setFocus()
+        } else {
+          new WebviewWindow('api-guide', {
+            url: '/docs/api-guide/index.html',
+            title: '使用指南',
+            width: 900,
+            height: 700,
+          })
+        }
+      } catch (e) {
+        console.error('Failed to open api guide:', e)
+      }
     } else {
       await open(`${window.location.origin}/docs/api-guide/index.html`)
     }
@@ -190,7 +205,7 @@ function App() {
 
       <Layout className="main-layout">
         <Content className="main-content">
-          <div style={{ display: currentView === 'chat' ? undefined : 'none' }}>
+          <div style={{ display: currentView === 'chat' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0 }}>
             <ChatView sessionId={sessionId} onNewChat={handleNewChat} />
           </div>
           {currentView === 'knowledge' && <KnowledgeBaseView />}
