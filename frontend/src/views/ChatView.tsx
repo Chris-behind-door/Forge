@@ -94,7 +94,7 @@ function ChatView({ sessionId, onNewChat }: ChatViewProps) {
       const detail = await res.json()
 
       if (detail.file_type === 'chm') {
-        const chmLocation = detail.location || c.location
+        const chmLocation = (detail.location || c.location || '').replace(/\\/g, '/')
         if (chmLocation && chmLocation.includes('/')) {
           const url = `${getApiBase()}/documents/${c.doc_id}/chm-html?` +
             new URLSearchParams({ path: chmLocation })
