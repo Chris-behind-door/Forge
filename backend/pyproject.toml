@@ -1,6 +1,6 @@
 [project]
 name = "engineer-assistant-backend"
-version = "0.1.6"
+version = "0.1.7"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.110.0",
