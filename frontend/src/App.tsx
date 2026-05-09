@@ -123,7 +123,12 @@ function App() {
   }
 
   const openApiGuide = useCallback(async () => {
-    const origin = window.location.origin; await open(`${origin}/docs/api-guide/index.html`)
+    const isTauri = !!(window as any).__TAURI_INTERNALS__
+    if (isTauri) {
+      window.open('/docs/api-guide/index.html', '_blank')
+    } else {
+      await open(`${window.location.origin}/docs/api-guide/index.html`)
+    }
   }, [])
 
   return (
