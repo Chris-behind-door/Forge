@@ -18,6 +18,7 @@ export default function UploadArea({ selectedProjectId, selectedProjectName, onU
   const [uploading, setUploading] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const lastDropTimeRef = useRef<number>(0)
+  const isUploadingRef = useRef(false)
 
   const uploadFile = async (filePath: string): Promise<boolean> => {
     try {
@@ -34,13 +35,16 @@ export default function UploadArea({ selectedProjectId, selectedProjectName, onU
   }
 
   const handleFilePaths = useCallback(async (paths: string[]) => {
+    if (isUploadingRef.current) return
     const supportedPaths = paths.filter(isSupportedFile)
     if (supportedPaths.length === 0) { message.warning('请拖拽 PDF 或 CHM 文件'); return }
+    isUploadingRef.current = true
     setUploading(true)
     let successCount = 0
     for (const path of supportedPaths) { if (await uploadFile(path)) successCount++ }
     onUploadComplete()
     setUploading(false)
+    isUploadingRef.current = false
     if (successCount > 0) message.info(`成功上传 ${successCount} 个文件`)
   }, [onUploadComplete, selectedProjectId])
 

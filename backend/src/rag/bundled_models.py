@@ -63,6 +63,10 @@ def extract_bundled_zip(
         exe_dir = Path(sys.executable).parent
         candidates.append(exe_dir / zip_name)
         candidates.append(exe_dir / "data" / zip_name)
+        # Tauri resource dir on Windows: <resource_dir>/backend-bundle/
+        # The exe may be inside backend-bundle/ already, but also check parent
+        candidates.append(exe_dir.parent / zip_name)
+        candidates.append(exe_dir.parent / "data" / zip_name)
     else:
         candidates.append(Path(__file__).parent.parent.parent / zip_name)
 

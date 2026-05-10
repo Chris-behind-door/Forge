@@ -175,9 +175,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path src-tauri/backend-bundle
           Copy-Item -Recurse backend\dist\backend\* src-tauri\backend-bundle\
           
+          # Copy model zips into backend-bundle so they get bundled too
+          Copy-Item backend\embedding-model.zip src-tauri\backend-bundle\
+          Copy-Item backend\reranker-model.zip src-tauri\backend-bundle\
+          
           $totalMB = [math]::Round((Get-ChildItem src-tauri\backend-bundle\ -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
           Write-Host "Staged backend-bundle: $totalMB MB"
-          Get-ChildItem src-tauri\backend-bundle\ | ForEach-Object { Write-Host "  $($_.Name)" }
+          Get-ChildItem src-tauri\backend-bundle\ | ForEach-Object { Write-Host "  $($_.Name) ($([math]::Round($_.Length/1MB)) MB)" }
 
       - name: Install frontend dependencies
         run: |
