@@ -17,7 +17,7 @@ from .routers.projects import router as projects_router
 from .routers.meetings import router as meetings_router
 from .services.import_worker import worker_loop as _import_worker_loop
 from .utils.llm_config import get_active_provider
-from .utils.paths import CURRENT_SCHEMA_VERSION, get_schema_version
+from .utils.paths import CURRENT_SCHEMA_VERSION, get_schema_version, migrate_from_legacy_path
 
 # 配置日志
 logging.basicConfig(
@@ -92,7 +92,10 @@ _sys.excepthook = _quiet_shutdown_hook
 
 @app.on_event("startup")
 async def on_startup():
-    """应用启动时：检查 schema 版本，恢复未完成的文档处理"""
+    """应用启动时：迁移数据（如有），检查 schema 版本，恢复未完成的文档处理"""
+    # 一次性迁移：从旧路径搬到 XDG
+    migrate_from_legacy_path()
+
     # 启动 import worker
     import asyncio
     _worker_task = asyncio.create_task(_import_worker_loop())  # noqa: RUF006

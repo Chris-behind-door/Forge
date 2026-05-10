@@ -40,10 +40,8 @@ jobs:
           mkdir -Force backend/bundled_tools
           Copy-Item 'C:\Program Files\7-Zip\7z.exe' backend/bundled_tools/
           Copy-Item 'C:\Program Files\7-Zip\7z.dll' backend/bundled_tools/
-          Write-Host "Bundled 7z:"
-          Get-ChildItem backend/bundled_tools/ | ForEach-Object { Write-Host "  $($_.Name) ($([math]::Round($_.Length/1KB))KB)" }
 
-      - name: Build Python sidecar
+      - name: Install backend dependencies
         working-directory: backend
         shell: pwsh
         run: |
@@ -64,24 +62,16 @@ jobs:
           from pathlib import Path
           from huggingface_hub import snapshot_download
 
-          # Download in HF cache format (snapshots/<hash>/...)
           cache_dir = Path('model-cache')
           cache_dir.mkdir(parents=True, exist_ok=True)
-          snapshot_download(
-              'Qdrant/bge-small-zh-v1.5',
-              cache_dir=str(cache_dir),
-          )
-          print('Model downloaded')
+          snapshot_download('Qdrant/bge-small-zh-v1.5', cache_dir=str(cache_dir))
 
-          # Pack into zip preserving HF cache structure
           model_dir = cache_dir / 'models--Qdrant--bge-small-zh-v1.5'
           with zipfile.ZipFile('embedding-model.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
               for f in sorted(model_dir.rglob('*')):
                   if f.is_file():
                       zf.write(f, f.relative_to(cache_dir))
-          import os as _os
-          size_mb = _os.path.getsize('embedding-model.zip') / 1024 / 1024
-          print(f'Created embedding-model.zip ({size_mb:.0f} MB)')
+          print(f'Created embedding-model.zip ({os.path.getsize(\"embedding-model.zip\")/1024/1024:.0f} MB)')
           "
 
       - name: Pre-download reranker model
@@ -95,39 +85,28 @@ jobs:
           from huggingface_hub import snapshot_download
           out = Path('reranker-snapshot')
           out.mkdir(parents=True, exist_ok=True)
-          print('Downloading reranker model...')
-          # Download directly to flat dir (no HF cache overhead)
-          snapshot_download(
-              'BAAI/bge-reranker-v2-m3',
-              local_dir=str(out),
-          )
-          print(f'Downloaded to {out}')
-          for f in sorted(out.rglob('*')):
-              if f.is_file():
-                  print(f'  {f.relative_to(out)} ({f.stat().st_size:,} bytes)')
+          snapshot_download('BAAI/bge-reranker-v2-m3', local_dir=str(out))
           "
 
           .\.venv\Scripts\activate
           python -c "
           import zipfile
           from pathlib import Path
-          print('Creating reranker-model.zip ...')
           snap = Path('reranker-snapshot')
           with zipfile.ZipFile('reranker-model.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
               for f in sorted(snap.rglob('*')):
                   if f.is_file():
                       zf.write(f, f.relative_to(snap))
-          size_mb = Path('reranker-model.zip').stat().st_size / 1024 / 1024
-          print(f'Created {size_mb:.0f} MB')
+          print(f'Created {Path(\"reranker-model.zip\").stat().st_size/1024/1024:.0f} MB')
           "
 
-      - name: Package with PyInstaller
+      - name: Package backend with PyInstaller (onedir)
         working-directory: backend
         shell: pwsh
         run: |
           .\.venv\Scripts\activate
-
-          pyinstaller --onefile --name backend --console `
+          # Use onedir to avoid the 4GB CArchive limit
+          pyinstaller --onedir --name backend --console `
             --paths src `
             --collect-all lancedb `
             --collect-all fastembed `
@@ -183,8 +162,8 @@ jobs:
             --add-data "bundled_tools;bundled_tools" `
             run.py
 
-          New-Item -ItemType Directory -Force -Path ..\src-tauri\binaries
-          Copy-Item dist\backend.exe ..\src-tauri\binaries\backend-x86_64-pc-windows-msvc.exe
+          $totalMB = [math]::Round((Get-ChildItem dist\backend\ -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
+          Write-Host "Backend onedir: $totalMB MB"
 
       - name: Install frontend dependencies
         run: |
@@ -195,28 +174,61 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - uses: tauri-apps/tauri-action@v0.6.2
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: .
           tauriScript: npx tauri
           tagName: v__VERSION__
-          releaseName: Forge v__VERSION__
+          releaseName: Engineering Assistant v__VERSION__
           releaseBody: |
             Windows build (auto)
           releaseDraft: true
           prerelease: false
 
-      - name: Upload model assets to release
+      - name: Bundle backend into installer
+        shell: pwsh
+        run: |
+          # Find the built NSIS installer
+          $installer = Get-ChildItem src-tauri\target\release\bundle\nsis\ -Filter "*.exe" | Select-Object -First 1
+          if (-not $installer) {
+            # Try msi
+            $installer = Get-ChildItem src-tauri\target\release\bundle\msi\ -Filter "*.msi" | Select-Object -First 1
+          }
+          Write-Host "Installer: $($installer.FullName)"
+
+          # The Tauri app installs to Program Files. We need the backend directory
+          # next to the exe. Copy backend dist into the Tauri target release dir
+          # so it gets picked up by the NSIS installer.
+          # 
+          # Actually, the better approach is to copy backend into the resources
+          # and let Tauri handle it. But for simplicity, let's create a
+          # self-extracting archive approach:
+          # 1. Zip the backend directory
+          # 2. Upload it alongside the installer
+
+          Compress-Archive -Path backend\dist\backend\* -DestinationPath backend-dist.zip
+          $sizeMB = [math]::Round((Get-Item backend-dist.zip).Length / 1MB)
+          Write-Host "Created backend-dist.zip ($sizeMB MB)"
+
+      - name: Upload artifacts to release
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Read version from tauri.conf.json
           $tauriConf = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
           $tag = "v$($tauriConf.version)"
-          Write-Host "Uploading model assets to release with tag: $tag"
+          Write-Host "Tag: $tag"
 
-          gh release upload $tag backend/embedding-model.zip backend/reranker-model.zip --clobber
+          # Upload model zips and backend dist
+          gh release upload $tag backend/embedding-model.zip backend/reranker-model.zip backend-dist.zip --clobber
+
+          # Also upload any installer that was created
+          $nsis = Get-ChildItem src-tauri\target\release\bundle\nsis\ -Filter "*.exe" | Select-Object -First 1
+          if ($nsis) {
+            gh release upload $tag $nsis.FullName --clobber
+            Write-Host "Uploaded NSIS installer"
+          }
           Write-Host "Done"

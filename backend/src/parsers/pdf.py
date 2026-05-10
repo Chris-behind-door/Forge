@@ -27,8 +27,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
-from rapidocr_onnxruntime import RapidOCR  # noqa: E402
-
 # 判断是否需要 OCR 的阈值：每页最少字符数
 MIN_TEXT_CHARS_FOR_SKIP_OCR = 50
 
@@ -36,7 +34,7 @@ MIN_TEXT_CHARS_FOR_SKIP_OCR = 50
 MAX_OCR_WORKERS = min(4, (os.cpu_count() or 4))
 
 # 每个线程的 OCR 引擎（懒加载）
-_ocr_engines: dict[int, RapidOCR] = {}
+_ocr_engines: dict = {}
 _ocr_lock = threading.Lock()
 
 
@@ -51,8 +49,9 @@ def _cleanup_ocr_engines() -> None:
 atexit.register(_cleanup_ocr_engines)
 
 
-def _get_ocr_engine() -> RapidOCR:
-    """获取当前线程的 OCR 引擎（线程安全）"""
+def _get_ocr_engine():
+    """获取当前线程的 OCR 引擎（线程安全，首次调用时才 import rapidocr）"""
+    from rapidocr_onnxruntime import RapidOCR
     thread_id = threading.get_ident()
     with _ocr_lock:
         if thread_id not in _ocr_engines:

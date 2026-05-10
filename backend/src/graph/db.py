@@ -10,15 +10,13 @@ import asyncio
 import logging
 from pathlib import Path
 
-import kuzu
-
 logger = logging.getLogger(__name__)
 
 KUZU_DIR = Path.home() / ".engineer_assistant" / "data"
 KUZU_PATH = KUZU_DIR / "kuzu.db"
 
-_db: kuzu.Database | None = None
-_conn: kuzu.Connection | None = None
+_db = None
+_conn = None
 _lock = asyncio.Lock()
 
 SCHEMAS = [
@@ -80,7 +78,7 @@ SCHEMAS = [
 ]
 
 
-def _init_schema(conn: kuzu.Connection) -> None:
+def _init_schema(conn) -> None:
     for ddl in SCHEMAS:
         try:
             conn.execute(ddl)
@@ -114,6 +112,7 @@ def _ensure_db() -> None:
     """Initialize the singleton Database and Connection (idempotent)."""
     global _db, _conn
     if _db is None:
+        import kuzu
         KUZU_DIR.mkdir(parents=True, exist_ok=True)
         try:
             _db = kuzu.Database(str(KUZU_PATH))
@@ -127,10 +126,10 @@ def _ensure_db() -> None:
         logger.info("Kùzu database initialized")
 
 
-def get_conn() -> kuzu.Connection:
+def get_conn():
     """Synchronous: return the singleton Connection."""
     _ensure_db()
-    return _conn  # type: ignore[return-value]
+    return _conn
 
 
 def get_lock() -> asyncio.Lock:

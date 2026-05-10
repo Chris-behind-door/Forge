@@ -12,10 +12,7 @@ import logging
 import os
 import threading
 
-import torch
-
 from ..utils.paths import VECTOR_DIR
-from .bundled_models import extract_bundled_zip
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +40,7 @@ _load_error: Exception | None = None
 
 def _detect_device() -> str:
     """检测最佳推理设备"""
+    import torch
     if torch.cuda.is_available():
         device = "cuda:0"
         logger.info("Reranker 使用 GPU: %s", torch.cuda.get_device_name(0))
@@ -66,6 +64,7 @@ def _load_reranker():
 
         try:
             from transformers import AutoModelForSequenceClassification, AutoTokenizer
+            import torch
 
             logger.info("正在加载 Reranker 模型 %s ...", RERANKER_MODEL)
 
@@ -169,6 +168,7 @@ def rerank(query: str, texts: list[str], top_k: int | None = None) -> list[float
     )
     features = {k: v.to(device) for k, v in features.items()}
 
+    import torch
     with torch.inference_mode():
         logits = model(**features).logits.squeeze(-1)
 

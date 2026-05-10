@@ -11,9 +11,6 @@ from uuid import uuid4
 from fastapi import HTTPException
 from pydantic import BaseModel
 
-from ..parsers.chm import parse_chm
-from ..parsers.pdf import parse_pdf
-from ..rag.vector_store import add_chunks, delete_doc_chunks
 from ..utils.paths import UPLOADS_DIR, METADATA_FILE, ensure_dirs
 
 logger = logging.getLogger(__name__)
@@ -92,6 +89,12 @@ def _calculate_file_hash(file_path: Path, chunk_size: int = 8192) -> str:
 _processing_tasks: dict[str, asyncio.Task] = {}
 
 
+def _delete_doc_chunks(doc_id: str) -> int:
+    """Lazy wrapper for vector_store.delete_doc_chunks."""
+    from ..rag.vector_store import delete_doc_chunks
+    return delete_doc_chunks(doc_id)
+
+
 async def process_document(doc_id: str, stored_path: str, file_type: str = "pdf") -> None:
     start_time = datetime.now()
     logger.info(f"[{doc_id[:8]}] 开始处理文档 (类型: {file_type})")
@@ -106,6 +109,10 @@ async def process_document(doc_id: str, stored_path: str, file_type: str = "pdf"
         doc.status = "processing"
         _save_metadata(metadata)
         logger.info(f"[{doc_id[:8]}] 状态更新: processing")
+
+        from ..parsers.chm import parse_chm
+        from ..parsers.pdf import parse_pdf
+        from ..rag.vector_store import add_chunks
 
         step_start = datetime.now()
         parser_func = parse_chm if file_type == "chm" else parse_pdf
@@ -206,7 +213,7 @@ async def upload(request: DocumentUploadRequest) -> Document:
                 stored_path = Path(doc.stored_path)
                 if stored_path.exists():
                     stored_path.unlink()
-                delete_doc_chunks(doc.id)
+                _delete_doc_chunks(doc.id)
                 del metadata[doc.id]
                 _save_metadata(metadata)
                 break
@@ -257,7 +264,7 @@ async def delete(doc_id: str) -> dict:
         stored_path.unlink()
         logger.info(f"[{doc_id[:8]}] 文件已删除")
 
-    delete_doc_chunks(doc_id)
+    _delete_doc_chunks(doc_id)
     logger.info(f"[{doc_id[:8]}] 向量数据已删除")
 
     del metadata[doc_id]
@@ -275,7 +282,7 @@ async def reprocess(doc_id: str) -> dict:
         raise HTTPException(status_code=404, detail=f"源文件不存在: {doc.stored_path}")
 
     cancel_processing(doc_id)
-    deleted = delete_doc_chunks(doc_id)
+    deleted = _delete_doc_chunks(doc_id)
     logger.info(f"[{doc_id[:8]}] 删除旧向量数据: {deleted} 条")
 
     metadata[doc_id].status = "pending"
@@ -295,7 +302,7 @@ async def reprocess_all() -> dict:
             results.append({"id": doc_id, "status": "skipped", "reason": "文件不存在"})
             continue
         cancel_processing(doc_id)
-        deleted = delete_doc_chunks(doc_id)
+        deleted = _delete_doc_chunks(doc_id)
         metadata[doc_id].status = "pending"
         metadata[doc_id].chunk_count = None
         start_processing(doc_id, str(stored_path), doc.file_type)
@@ -339,7 +346,9 @@ async def move(doc_id: str, project_id: str | None) -> Document:
 
 
 def get_chunk_detail(doc_id: str, chunk_index: int) -> ChunkDetail:
-    from ..rag.vector_store import get_db, CHUNKS_TABLE, ChunkRecord
+    from ..rag.vector_store import get_db, CHUNKS_TABLE, _get_chunk_record
+
+    ChunkRecord = _get_chunk_record()
 
     metadata = _load_metadata()
     if doc_id not in metadata:

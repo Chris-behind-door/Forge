@@ -7,11 +7,9 @@ import logging
 import os
 import threading
 
-logger = logging.getLogger(__name__)
+from ..utils.paths import VECTOR_DIR
 
-from fastembed import TextEmbedding  # noqa: E402
-from ..utils.paths import VECTOR_DIR  # noqa: E402
-from .bundled_models import extract_bundled_zip  # noqa: E402
+logger = logging.getLogger(__name__)
 
 # Model configuration
 EMBEDDING_MODEL = "BAAI/bge-small-zh-v1.5"
@@ -26,7 +24,11 @@ _EMBEDDING_MODEL_DIR = "models--Qdrant--bge-small-zh-v1.5"
 
 # Thread lock to prevent concurrent model downloads
 _model_lock = threading.Lock()
-_embedding_model: TextEmbedding | None = None
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from fastembed import TextEmbedding
+
+_embedding_model: "TextEmbedding | None" = None
 _model_error: Exception | None = None
 
 
@@ -38,13 +40,16 @@ _MIRROR_ENDPOINTS = [
 ]
 
 
-def _download_model() -> TextEmbedding:
+def _download_model() -> "TextEmbedding":
     """
     Download (if needed) and load the embedding model.
     Tries offline bundle → local cache → online download.
     Thread-safe.
     """
     global _embedding_model, _model_error
+
+    from fastembed import TextEmbedding
+    from .bundled_models import extract_bundled_zip
 
     if _embedding_model is not None:
         return _embedding_model
@@ -123,7 +128,7 @@ def _download_model() -> TextEmbedding:
             raise
 
 
-def get_embedding_model() -> TextEmbedding:
+def get_embedding_model() -> "TextEmbedding":
     """Get or create embedding model instance."""
     return _download_model()
 

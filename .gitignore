@@ -65,3 +65,4 @@ packaging/BUILD/
 packaging/RPMS/
 packaging/SRPMS/
 src-tauri/target/release/bundle/
+rpm-build/

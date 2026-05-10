@@ -10,19 +10,15 @@
 检索策略（两阶段）：
 1. 粗排：LanceDB hybrid search（向量语义 + FTS 全文搜索，RRF 融合）
 2. 精排：CrossEncoder reranker 对 top 候选重排序
+
+注意：重模块（lancedb, fastembed, torch）均为懒加载，不在模块顶部 import。
 """
 
 import logging
 import os
 from typing import Any
 
-import lancedb
-from lancedb.pydantic import LanceModel, Vector
-from pydantic import Field
-
 from ..utils.paths import VECTOR_DIR
-from .embeddings import EMBEDDING_DIM, embed_query, embed_texts
-from .reranker import make_reranker_fn
 
 logger = logging.getLogger(__name__)
 
@@ -32,29 +28,49 @@ CHUNKS_TABLE = "chunks"
 # FTS 索引名称
 FTS_INDEX_NAME = "text_idx"
 
-
-class ChunkRecord(LanceModel):
-    """分块记录结构"""
-
-    chunk_id: str = Field(description="分块唯一标识")
-    doc_id: str = Field(description="所属文档 ID")
-    text: str = Field(description="分块文本")
-    page: int | None = Field(default=None, description="页码（PDF）")
-    location: str | None = Field(default=None, description="位置标识（CHM等）")
-    project_id: str | None = Field(
-        default=None, description="所属项目，null 表示通用知识"
-    )
-    vector: Vector(EMBEDDING_DIM) = Field(description="嵌入向量")
+# 懒加载的 ChunkRecord 模型（首次使用时构建）
+_ChunkRecordModel = None
 
 
-def get_db() -> lancedb.DBConnection:
+def _get_chunk_record():
+    """Lazily build and cache the ChunkRecord LanceModel."""
+    global _ChunkRecordModel
+    if _ChunkRecordModel is not None:
+        return _ChunkRecordModel
+
+    import lancedb
+    from lancedb.pydantic import LanceModel, Vector
+    from pydantic import Field
+    from .embeddings import EMBEDDING_DIM
+
+    class ChunkRecord(LanceModel):
+        chunk_id: str = Field(description="分块唯一标识")
+        doc_id: str = Field(description="所属文档 ID")
+        text: str = Field(description="分块文本")
+        page: int | None = Field(default=None, description="页码（PDF）")
+        location: str | None = Field(default=None, description="位置标识（CHM等）")
+        project_id: str | None = Field(default=None, description="所属项目，null 表示通用知识")
+        vector: Vector(EMBEDDING_DIM) = Field(description="嵌入向量")
+
+    _ChunkRecordModel = ChunkRecord
+    return ChunkRecord
+
+
+# Re-export ChunkRecord name for backward compatibility
+# (other modules do `from ..rag.vector_store import ChunkRecord`)
+ChunkRecord = property(lambda self: _get_chunk_record())
+
+
+def get_db():
     """获取 LanceDB 连接"""
+    import lancedb
     VECTOR_DIR.mkdir(parents=True, exist_ok=True)
     return lancedb.connect(str(VECTOR_DIR))
 
 
-def _get_or_create_table(db: lancedb.DBConnection) -> lancedb.table.Table:
+def _get_or_create_table(db):
     """获取或创建表，必要时迁移 schema"""
+    ChunkRecord = _get_chunk_record()
     if CHUNKS_TABLE in db.table_names():
         table = db.open_table(CHUNKS_TABLE)
         schema = table.schema
@@ -68,7 +84,7 @@ def _get_or_create_table(db: lancedb.DBConnection) -> lancedb.table.Table:
     return db.create_table(CHUNKS_TABLE, schema=ChunkRecord)
 
 
-def _ensure_fts_index(table: lancedb.table.Table) -> None:
+def _ensure_fts_index(table) -> None:
     """确保 FTS 全文搜索索引存在"""
     try:
         index_names = [idx.name for idx in table.list_indices()]
@@ -93,6 +109,9 @@ def add_chunks(doc_id: str, chunks: list[dict], project_id: str | None = None) -
     """
     if not chunks:
         return 0
+
+    from .embeddings import embed_texts
+    ChunkRecord = _get_chunk_record()
 
     db = get_db()
     table = _get_or_create_table(db)
@@ -159,18 +178,10 @@ def search_similar(
 ) -> list[dict[str, Any]]:
     """
     两阶段检索：LanceDB hybrid 粗排 → CrossEncoder 精排
-
-    粗排：向量语义搜索 + FTS 全文搜索，RRF 融合
-    精排：CrossEncoder 对 top_k * 2 候选重排序
-
-    Args:
-        query: 查询字符串
-        top_k: 返回结果数量
-        project_id: 按项目过滤
-
-    Returns:
-        匹配的分块列表，包含分数
     """
+    from .embeddings import embed_query
+    from .reranker import make_reranker_fn
+
     db = get_db()
 
     if CHUNKS_TABLE not in db.table_names():
@@ -201,7 +212,6 @@ def search_similar(
 
     # 第一阶段：粗排
     if has_fts:
-        # Hybrid search：向量 + FTS + RRF 融合
         try:
             results = (
                 table.search(
@@ -219,7 +229,6 @@ def search_similar(
             logger.warning("Hybrid search failed, falling back to vector-only: %s", e)
             results = _vector_only_search(table, query_vector, where_clause, n_candidates)
     else:
-        # FTS 不可用，纯向量搜索
         results = _vector_only_search(table, query_vector, where_clause, n_candidates)
 
     if not results:
@@ -239,7 +248,7 @@ def search_similar(
             }
         )
 
-    # 第二阶段：CrossEncoder 精排（可通过环境变量 FORGE_DISABLE_RERANKER=1 禁用）
+    # 第二阶段：CrossEncoder 精排
     rerank_input = candidates[: top_k * 2]
     disable_reranker = os.environ.get("FORGE_DISABLE_RERANKER", "").strip().lower() in ("1", "true", "yes")
     if disable_reranker:
@@ -253,21 +262,14 @@ def search_similar(
             c["reranker_score"] = rs
             c["score"] = rs
         rerank_input.sort(key=lambda x: x["score"], reverse=True)
-        logger.info(
-            "Reranker applied to %d candidates", len(rerank_input)
-        )
+        logger.info("Reranker applied to %d candidates", len(rerank_input))
         return rerank_input[:top_k]
     except Exception as e:
         logger.warning("Reranker unavailable, using hybrid scores: %s", e)
         return candidates[:top_k]
 
 
-def _vector_only_search(
-    table: lancedb.table.Table,
-    query_vector: list[float],
-    where_clause: str,
-    limit: int,
-) -> list[dict]:
+def _vector_only_search(table, query_vector: list[float], where_clause: str, limit: int) -> list[dict]:
     """纯向量搜索（FTS 不可用时的降级方案）"""
     return (
         table.search(query_vector, vector_column_name="vector")
@@ -280,18 +282,9 @@ def _vector_only_search(
 def get_adjacent_chunks(
     doc_id: str, chunk_indices: list[int], before: int = 1, after: int = 1
 ) -> list[dict[str, Any]]:
-    """
-    获取指定 chunk 前后的相邻分块（用于上下文扩展）
+    """获取指定 chunk 前后的相邻分块（用于上下文扩展）"""
+    ChunkRecord = _get_chunk_record()
 
-    Args:
-        doc_id: 文档 ID
-        chunk_indices: 需要扩展的 chunk 序号列表
-        before: 向前取几个 chunk
-        after: 向后取几个 chunk
-
-    Returns:
-        去重后的相邻分块列表，按序号排序
-    """
     db = get_db()
     if CHUNKS_TABLE not in db.table_names():
         return []
@@ -342,15 +335,7 @@ def get_adjacent_chunks(
 
 
 def get_chunk_count(doc_id: str | None = None) -> int:
-    """
-    获取分块数量
-
-    Args:
-        doc_id: 可选的文档 ID 过滤
-
-    Returns:
-        分块数量
-    """
+    """获取分块数量"""
     db = get_db()
 
     if CHUNKS_TABLE not in db.table_names():
