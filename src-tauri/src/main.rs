@@ -94,11 +94,14 @@ fn main() {
                     .and_then(|p| p.parent().map(|d| d.to_path_buf()))
                     .unwrap_or_default();
 
-                // Try relative path first, then PATH
-                let backend_path = exe_dir.join("backend").join("backend");
-                let backend_cmd = if backend_path.exists() {
-                    println!("[Forge] Found backend at: {:?}", backend_path);
-                    backend_path.to_string_lossy().to_string()
+                // Try relative path first (<install_dir>/backend), then PATH
+                // On Linux RPM: exe is /usr/bin/engineer-assistant, backend is at
+                //   /usr/lib/engineer-assistant/backend (via /usr/bin/backend wrapper)
+                // On Windows: exe and backend are in the same directory
+                let backend_in_exe_dir = exe_dir.join("backend");
+                let backend_cmd = if backend_in_exe_dir.exists() {
+                    println!("[Forge] Found backend at: {:?}", backend_in_exe_dir);
+                    backend_in_exe_dir.to_string_lossy().to_string()
                 } else {
                     println!("[Forge] Using backend from PATH");
                     "backend".to_string()
