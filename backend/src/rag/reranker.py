@@ -64,7 +64,7 @@ def _load_reranker():
 
         try:
             from transformers import AutoModelForSequenceClassification, AutoTokenizer
-            import torch
+            from ..rag.bundled_models import extract_bundled_zip
 
             logger.info("正在加载 Reranker 模型 %s ...", RERANKER_MODEL)
 

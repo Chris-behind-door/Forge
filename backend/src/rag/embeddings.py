@@ -24,7 +24,8 @@ _EMBEDDING_MODEL_DIR = "models--Qdrant--bge-small-zh-v1.5"
 
 # Thread lock to prevent concurrent model downloads
 _model_lock = threading.Lock()
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING  # noqa: E402
+
 if TYPE_CHECKING:
     from fastembed import TextEmbedding
 

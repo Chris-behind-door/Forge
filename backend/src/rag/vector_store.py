@@ -38,7 +38,6 @@ def _get_chunk_record():
     if _ChunkRecordModel is not None:
         return _ChunkRecordModel
 
-    import lancedb
     from lancedb.pydantic import LanceModel, Vector
     from pydantic import Field
     from .embeddings import EMBEDDING_DIM

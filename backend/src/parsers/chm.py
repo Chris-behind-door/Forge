@@ -134,9 +134,9 @@ def _extract_chm_7z(chm_path: str, output_dir: str) -> bool:
     candidates = []
 
     # Bundled 7z (shipped with the app in bundled_tools/)
-    if getattr(sys, '_MEIPASS', None):
-        # Running as PyInstaller bundle
-        bundled = Path(sys._MEIPASS) / 'bundled_tools' / '7z.exe'
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller bundle (onedir mode)
+        bundled = Path(sys.executable).parent / 'bundled_tools' / '7z.exe'
     else:
         # Running as plain Python
         bundled = Path(__file__).resolve().parent.parent.parent / 'bundled_tools' / '7z.exe'
