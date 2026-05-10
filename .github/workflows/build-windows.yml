@@ -107,7 +107,6 @@ jobs:
         shell: pwsh
         run: |
           .\.venv\Scripts\activate
-          # Use onedir to avoid the 4GB CArchive limit
           pyinstaller --onedir --name backend --console `
             --paths src `
             --collect-all lancedb `
@@ -167,6 +166,19 @@ jobs:
           $totalMB = [math]::Round((Get-ChildItem dist\backend\ -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
           Write-Host "Backend onedir: $totalMB MB"
 
+      - name: Stage backend for Tauri bundle
+        shell: pwsh
+        run: |
+          # Copy backend onedir output to src-tauri/backend-bundle/
+          # Tauri will include this as resources in the installer
+          Remove-Item -Recurse -Force src-tauri/backend-bundle -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path src-tauri/backend-bundle
+          Copy-Item -Recurse backend\dist\backend\* src-tauri\backend-bundle\
+          
+          $totalMB = [math]::Round((Get-ChildItem src-tauri\backend-bundle\ -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
+          Write-Host "Staged backend-bundle: $totalMB MB"
+          Get-ChildItem src-tauri\backend-bundle\ | ForEach-Object { Write-Host "  $($_.Name)" }
+
       - name: Install frontend dependencies
         run: |
           npm install
@@ -176,7 +188,7 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Build Tauri app
+      - name: Build Tauri app (with bundled backend)
         uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -190,32 +202,7 @@ jobs:
           releaseDraft: true
           prerelease: false
 
-      - name: Bundle backend into installer
-        shell: pwsh
-        run: |
-          # Find the built NSIS installer
-          $installer = Get-ChildItem src-tauri\target\release\bundle\nsis\ -Filter "*.exe" | Select-Object -First 1
-          if (-not $installer) {
-            # Try msi
-            $installer = Get-ChildItem src-tauri\target\release\bundle\msi\ -Filter "*.msi" | Select-Object -First 1
-          }
-          Write-Host "Installer: $($installer.FullName)"
-
-          # The Tauri app installs to Program Files. We need the backend directory
-          # next to the exe. Copy backend dist into the Tauri target release dir
-          # so it gets picked up by the NSIS installer.
-          # 
-          # Actually, the better approach is to copy backend into the resources
-          # and let Tauri handle it. But for simplicity, let's create a
-          # self-extracting archive approach:
-          # 1. Zip the backend directory
-          # 2. Upload it alongside the installer
-
-          Compress-Archive -Path backend\dist\backend\* -DestinationPath backend-dist.zip
-          $sizeMB = [math]::Round((Get-Item backend-dist.zip).Length / 1MB)
-          Write-Host "Created backend-dist.zip ($sizeMB MB)"
-
-      - name: Upload artifacts to release
+      - name: Upload model assets to release
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -224,13 +211,5 @@ jobs:
           $tag = "v$($tauriConf.version)"
           Write-Host "Tag: $tag"
 
-          # Upload model zips and backend dist
-          gh release upload $tag backend/embedding-model.zip backend/reranker-model.zip backend-dist.zip --clobber
-
-          # Also upload any installer that was created
-          $nsis = Get-ChildItem src-tauri\target\release\bundle\nsis\ -Filter "*.exe" | Select-Object -First 1
-          if ($nsis) {
-            gh release upload $tag $nsis.FullName --clobber
-            Write-Host "Uploaded NSIS installer"
-          }
+          gh release upload $tag backend/embedding-model.zip backend/reranker-model.zip --clobber
           Write-Host "Done"

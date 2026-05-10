@@ -82,10 +82,11 @@ fn main() {
                     .spawn()
                     .expect("Failed to spawn backend");
             } else {
-                // Prod mode: find backend relative to the executable
-                // Linux: /usr/lib/engineer-assistant/backend/backend
-                //   or: /usr/bin/backend (fallback)
-                // Windows: <install_dir>/backend/backend.exe
+                // Prod mode: find backend executable
+                // Search order:
+                //   1. Tauri resource dir (Windows/macOS bundles)
+                //   2. exe sibling dir (portable installs)
+                //   3. PATH fallback (Linux RPM)
                 println!("[Forge] Prod mode – starting backend");
                 println!("[Forge] Port: {backend_port}");
 
@@ -94,14 +95,22 @@ fn main() {
                     .and_then(|p| p.parent().map(|d| d.to_path_buf()))
                     .unwrap_or_default();
 
-                // Try relative path first (<install_dir>/backend), then PATH
-                // On Linux RPM: exe is /usr/bin/engineer-assistant, backend is at
-                //   /usr/lib/engineer-assistant/backend (via /usr/bin/backend wrapper)
-                // On Windows: exe and backend are in the same directory
-                let backend_in_exe_dir = exe_dir.join("backend");
-                let backend_cmd = if backend_in_exe_dir.exists() {
-                    println!("[Forge] Found backend at: {:?}", backend_in_exe_dir);
-                    backend_in_exe_dir.to_string_lossy().to_string()
+                // Tauri resource directory (contains bundled backend-bundle/)
+                let resource_backend = app.path()
+                    .resource_dir()
+                    .ok()
+                    .map(|d| d.join("backend-bundle").join("backend"))
+                    .unwrap_or_default();
+
+                // exe sibling (portable)
+                let exe_sibling = exe_dir.join("backend");
+
+                let backend_cmd = if resource_backend.exists() {
+                    println!("[Forge] Found backend in resources: {:?}", resource_backend);
+                    resource_backend.to_string_lossy().to_string()
+                } else if exe_sibling.exists() {
+                    println!("[Forge] Found backend next to exe: {:?}", exe_sibling);
+                    exe_sibling.to_string_lossy().to_string()
                 } else {
                     println!("[Forge] Using backend from PATH");
                     "backend".to_string()
