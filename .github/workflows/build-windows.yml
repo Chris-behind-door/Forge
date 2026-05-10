@@ -71,7 +71,8 @@ jobs:
               for f in sorted(model_dir.rglob('*')):
                   if f.is_file():
                       zf.write(f, f.relative_to(cache_dir))
-          print(f'Created embedding-model.zip ({os.path.getsize(\"embedding-model.zip\")/1024/1024:.0f} MB)')
+          sz = os.path.getsize('embedding-model.zip') / 1024 / 1024
+          print(f'Created embedding-model.zip ({sz:.0f} MB)')
           "
 
       - name: Pre-download reranker model
@@ -97,7 +98,8 @@ jobs:
               for f in sorted(snap.rglob('*')):
                   if f.is_file():
                       zf.write(f, f.relative_to(snap))
-          print(f'Created {Path(\"reranker-model.zip\").stat().st_size/1024/1024:.0f} MB')
+          sz = Path('reranker-model.zip').stat().st_size / 1024 / 1024
+          print(f'Created {sz:.0f} MB')
           "
 
       - name: Package backend with PyInstaller (onedir)
