@@ -35,7 +35,7 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "backend-bundle/*"
+      "backend-bundle/"
     ]
   }
 }
