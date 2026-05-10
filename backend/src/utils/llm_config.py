@@ -55,7 +55,7 @@ PROVIDERS: dict[str, dict[str, str]] = {
     "deepseek": {
         "name": "DeepSeek",
         "default_base_url": "https://api.deepseek.com/v1",
-        "default_model": "deepseek-chat",
+        "default_model": "deepseek-v4-flash",
     },
     "tongyi": {
         "name": "通义千问",
