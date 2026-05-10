@@ -95,19 +95,34 @@ fn main() {
                     .and_then(|p| p.parent().map(|d| d.to_path_buf()))
                     .unwrap_or_default();
 
+                // Log all candidate paths for debugging
+                let resource_dir = app.path().resource_dir().unwrap_or_default();
+                println!("[Forge] exe_dir: {:?}", exe_dir);
+                println!("[Forge] resource_dir: {:?}", resource_dir);
+
                 // Tauri resource directory (contains bundled backend-bundle/)
-                let resource_backend = app.path()
-                    .resource_dir()
-                    .ok()
-                    .map(|d| d.join("backend-bundle").join("backend"))
-                    .unwrap_or_default();
+                let resource_backend = resource_dir.join("backend-bundle").join("backend.exe");
+
+                // Also try without .exe (in case non-Windows path is kept)
+                let resource_backend_noexe = resource_dir.join("backend-bundle").join("backend");
 
                 // exe sibling (portable)
                 let exe_sibling = exe_dir.join("backend");
 
+                // List what's actually in resource_dir for debugging
+                if let Ok(entries) = std::fs::read_dir(&resource_dir) {
+                    println!("[Forge] resource_dir contents:");
+                    for entry in entries.flatten() {
+                        println!("[Forge]   {}", entry.path().display());
+                    }
+                }
+
                 let backend_cmd = if resource_backend.exists() {
                     println!("[Forge] Found backend in resources: {:?}", resource_backend);
                     resource_backend.to_string_lossy().to_string()
+                } else if resource_backend_noexe.exists() {
+                    println!("[Forge] Found backend in resources (no .exe): {:?}", resource_backend_noexe);
+                    resource_backend_noexe.to_string_lossy().to_string()
                 } else if exe_sibling.exists() {
                     println!("[Forge] Found backend next to exe: {:?}", exe_sibling);
                     exe_sibling.to_string_lossy().to_string()

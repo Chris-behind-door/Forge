@@ -17,5 +17,5 @@ dirs = "6"  # still used by backend TMPDIR fallback if needed later
 
 [features]
 console = []
-default = ["custom-protocol"]
+default = ["custom-protocol", "console"]
 custom-protocol = ["tauri/custom-protocol"]
