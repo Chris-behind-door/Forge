@@ -55,9 +55,11 @@ backend/.venv/
 tests/
 proxy.deprecated/
 backend/build/
+!backend/build.spec
 backend/dist/
 backend/data/
 backend/*.spec
+!backend/build.spec
 
 # Packaging
 packaging/SOURCES/
