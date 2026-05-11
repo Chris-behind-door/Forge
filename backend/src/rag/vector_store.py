@@ -63,14 +63,7 @@ ChunkRecord = property(lambda self: _get_chunk_record())
 def get_db():
     """获取 LanceDB 连接"""
     import lancedb
-    import sys
     VECTOR_DIR.mkdir(parents=True, exist_ok=True)
-    # On Windows, lance drops the drive letter when converting paths to file:// URLs
-    # (C:\Users\... → file:///Data/Users/... instead of file:///C:/Data/Users/...)
-    # Workaround: pass the proper file:// URI ourselves.
-    if sys.platform == "win32":
-        uri = VECTOR_DIR.as_uri()  # file:///C:/Users/.../vectors
-        return lancedb.connect(uri)
     return lancedb.connect(str(VECTOR_DIR))
 
 

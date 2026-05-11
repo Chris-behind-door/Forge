@@ -53,8 +53,16 @@ def _resolve_data_dir() -> Path:
 BACKEND_DIR = _resolve_backend_dir()
 DATA_DIR = _resolve_data_dir()
 UPLOADS_DIR = DATA_DIR / "uploads"
-VECTOR_DIR = DATA_DIR / "vectors"
 METADATA_FILE = DATA_DIR / "documents.json"
+
+# LanceDB vectors: use exe-adjacent path on Windows to avoid
+# lance Rust bug that drops drive letter from file:// URLs
+# (C:\Users\... → file:///Data/Users/... missing the C:)
+if getattr(sys, "frozen", False) and sys.platform == "win32":
+    _LANCE_DIR = BACKEND_DIR / "data" / "vectors"
+else:
+    _LANCE_DIR = DATA_DIR / "vectors"
+VECTOR_DIR = _LANCE_DIR
 
 # Schema version (increment when vector schema changes)
 SCHEMA_VERSION_FILE = DATA_DIR / "schema_version.txt"
