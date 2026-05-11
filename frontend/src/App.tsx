@@ -13,6 +13,7 @@ import ChatView from './views/ChatView'
 import KnowledgeBaseView from './views/KnowledgeBaseView'
 import ConfigView from './views/ConfigView'
 import MeetingsView from './views/MeetingsView'
+import { useProjects } from './hooks/useProjects'
 import './App.css'
 
 const { Sider, Content } = Layout
@@ -52,6 +53,7 @@ interface SessionInfo {
 
 function App() {
   const [currentView, setCurrentView] = useState<ViewType>('chat')
+  const sharedProjects = useProjects()
 
   // Listen for dynamic backend port from Tauri
   useEffect(() => {
@@ -206,9 +208,9 @@ function App() {
       <Layout className="main-layout">
         <Content className="main-content">
           <div style={{ display: currentView === 'chat' ? 'flex' : 'none', flex: 1, flexDirection: 'column', minHeight: 0 }}>
-            <ChatView sessionId={sessionId} onNewChat={handleNewChat} />
+            <ChatView sessionId={sessionId} onNewChat={handleNewChat} projects={sharedProjects.projects} />
           </div>
-          {currentView === 'knowledge' && <KnowledgeBaseView />}
+          {currentView === 'knowledge' && <KnowledgeBaseView sharedProjects={sharedProjects} />}
           {currentView === 'meetings' && <MeetingsView />}
           {currentView === 'config' && <ConfigView />}
         </Content>

@@ -19,6 +19,7 @@ import { listen } from '@tauri-apps/api/event'
 import MarkdownContent from '../components/MarkdownContent'
 import type { Citation } from '../types'
 import { useProjects } from '../hooks/useProjects'
+import type { Project } from '../types'
 import './ChatView.css'
 
 interface Message {
@@ -32,6 +33,7 @@ interface Message {
 interface ChatViewProps {
   sessionId: string | null
   onNewChat: () => Promise<string>
+  projects?: Project[]
 }
 
 let messageId = 0
@@ -41,13 +43,14 @@ import { getApiBase } from '../api'
 
 const { TextArea } = Input
 
-function ChatView({ sessionId, onNewChat }: ChatViewProps) {
+function ChatView({ sessionId, onNewChat, projects: externalProjects }: ChatViewProps) {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
   const [ipcToken, setIpcToken] = useState<string | null>(null)
   const [selectedProjectId, setSelectedProjectId] = useState<string>('__general__')
-  const { projects } = useProjects()
+  const localProjects = useProjects()
+  const projects = externalProjects || localProjects.projects
 
   useEffect(() => {
     const unlisten = listen<string>('ipc-token', (event) => {

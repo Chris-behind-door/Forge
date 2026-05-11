@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Modal, Input, Form, message } from 'antd'
 import { getApiBase } from '../api'
 import { useProjects } from '../hooks/useProjects'
+import type { Project } from '../types'
 import ProjectSelector from '../components/ProjectSelector'
 import UploadArea from '../components/UploadArea'
 import DocumentList from '../components/DocumentList'
@@ -21,11 +22,16 @@ interface Document {
   project_id: string | null
 }
 
-function KnowledgeBaseView() {
+interface KnowledgeBaseViewProps {
+  sharedProjects?: ReturnType<typeof useProjects>
+}
+
+function KnowledgeBaseView({ sharedProjects }: KnowledgeBaseViewProps) {
   const [documents, setDocuments] = useState<Document[]>([])
   const [initialLoading, setInitialLoading] = useState(true)
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null)
-  const { projects, createProject, updateProject, deleteProject } = useProjects()
+  const localProjects = useProjects()
+  const { projects, createProject, updateProject, deleteProject, fetchProjects: localFetch } = sharedProjects || localProjects
 
   // Project modal
   const [projectModalOpen, setProjectModalOpen] = useState(false)
