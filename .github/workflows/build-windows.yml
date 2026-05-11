@@ -49,6 +49,8 @@ jobs:
           uv venv
           .\.venv\Scripts\activate
           uv pip install -e ".[dev]"
+          # Install CPU-only PyTorch (much smaller than CUDA version)
+          uv pip install torch --index-url https://download.pytorch.org/whl/cpu
           uv pip install pyinstaller
 
       - name: Pre-download embedding model

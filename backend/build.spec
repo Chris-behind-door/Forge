@@ -30,7 +30,7 @@ hiddenimports = [
 # Collect heavy packages
 for pkg in ['lancedb', 'fastembed', 'rapidocr_onnxruntime', 'fitz', 'pymupdf',
             'langchain_text_splitters', 'llama_index', 'llama_index_workflows',
-            'kuzu']:
+            'kuzu', 'transformers']:
     tmp_ret = collect_all(pkg)
     datas += tmp_ret[0]
     binaries += tmp_ret[1]
@@ -46,9 +46,9 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        'torch', 'triton', 'torchvision', 'torchaudio',
+        'triton', 'torchvision', 'torchaudio',
         'tensorflow', 'keras',
-        'transformers', 'accelerate', 'sentence_transformers',
+        'accelerate', 'sentence_transformers',
         'scipy', 'sklearn', 'scikit-learn',
         'cv2', 'opencv_python',
         'datasets', 'sympy', 'matplotlib',
