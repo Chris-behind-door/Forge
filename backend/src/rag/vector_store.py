@@ -64,7 +64,10 @@ def get_db():
     """获取 LanceDB 连接"""
     import lancedb
     VECTOR_DIR.mkdir(parents=True, exist_ok=True)
-    return lancedb.connect(str(VECTOR_DIR))
+    # Use forward slashes to avoid lance URL conversion issue on Windows
+    # (drive letter gets stripped when converting backslash paths to file:// URLs)
+    path = str(VECTOR_DIR).replace('\\', '/')
+    return lancedb.connect(path)
 
 
 def _get_or_create_table(db):
