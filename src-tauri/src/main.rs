@@ -39,6 +39,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             // Set window icon (embedded at compile time, works in all modes)
             if let Some(window) = app.get_webview_window("main") {
