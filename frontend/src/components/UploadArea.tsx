@@ -17,8 +17,8 @@ interface Props {
 export default function UploadArea({ selectedProjectId, selectedProjectName, onUploadComplete }: Props) {
   const [uploading, setUploading] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
-  const lastDropTimeRef = useRef<number>(0)
   const isUploadingRef = useRef(false)
+  const dropCountRef = useRef(0)
 
   const uploadFile = async (filePath: string): Promise<boolean> => {
     try {
@@ -58,28 +58,43 @@ export default function UploadArea({ selectedProjectId, selectedProjectName, onU
     } catch (err) { message.error(`选择文件失败: ${err}`) }
   }, [handleFilePaths])
 
-  // Tauri drag-drop
+  // Tauri drag-drop — use refs to avoid closure staleness and listener stacking
+  const handleFilePathsRef = useRef(handleFilePaths)
+  handleFilePathsRef.current = handleFilePaths
+
   useEffect(() => {
-    let unlisten: (() => void) | null = null
+    let unlisten: (() => void) | undefined
+
     const setup = async () => {
       try {
         const { getCurrentWindow } = await import('@tauri-apps/api/window')
         unlisten = await getCurrentWindow().onDragDropEvent((event: any) => {
           const payload = event.payload
-          if (payload.type === 'enter' || payload.type === 'over') setIsDragging(true)
-          else if (payload.type === 'drop') {
+          if (payload.type === 'enter' || payload.type === 'over') {
+            setIsDragging(true)
+          } else if (payload.type === 'drop') {
             setIsDragging(false)
-            const now = Date.now()
-            if (now - lastDropTimeRef.current < 500) return
-            lastDropTimeRef.current = now
-            if (payload.paths?.length) handleFilePaths(payload.paths)
-          } else if (payload.type === 'leave' || payload.type === 'cancel') setIsDragging(false)
+            // Deduplicate: only accept the first drop in a batch
+            dropCountRef.current++
+            const thisDrop = dropCountRef.current
+            setTimeout(() => {
+              if (thisDrop === dropCountRef.current && payload.paths?.length) {
+                handleFilePathsRef.current(payload.paths)
+              }
+            }, 100)
+          } else if (payload.type === 'leave' || payload.type === 'cancel') {
+            setIsDragging(false)
+          }
         })
       } catch { /* not Tauri */ }
     }
+
     setup()
-    return () => { if (unlisten) unlisten() }
-  }, [handleFilePaths])
+
+    return () => {
+      if (unlisten) unlisten()
+    }
+  }, []) // stable — no deps, uses refs
 
   return (
     <Card className="upload-card">
