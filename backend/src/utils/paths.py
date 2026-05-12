@@ -58,8 +58,18 @@ METADATA_FILE = DATA_DIR / "documents.json"
 # LanceDB vectors: use exe-adjacent path on Windows to avoid
 # lance Rust bug that drops drive letter from file:// URLs
 # (C:\Users\... → file:///Data/Users/... missing the C:)
+# Also resolve 8.3 short path to avoid spaces being %20-encoded
 if getattr(sys, "frozen", False) and sys.platform == "win32":
-    _LANCE_DIR = BACKEND_DIR / "data" / "vectors"
+    _base = BACKEND_DIR
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(260)
+        ctypes.windll.kernel32.GetShortPathNameW(str(_base.resolve()), buf, 260)
+        if buf.value:
+            _base = Path(buf.value)
+    except Exception:
+        pass
+    _LANCE_DIR = _base / "data" / "vectors"
 else:
     _LANCE_DIR = DATA_DIR / "vectors"
 VECTOR_DIR = _LANCE_DIR
