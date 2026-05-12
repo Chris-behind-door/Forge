@@ -1,148 +1,124 @@
-"""
-Cross-encoder Reranker 模块
+"""Cross-encoder Reranker 模块 — ONNX Runtime 推理
 
-使用 transformers 原生 AutoModelForSequenceClassification 加载 bge-reranker-v2-m3。
-延迟加载：首次调用时才加载模型。
-支持离线模型包 + HF cache + 镜像源回退。
-
-注：不用 sentence_transformers.CrossEncoder（5.x 版本 OOM 问题严重）。
+使用 onnxruntime 替代 transformers + torch 加载 bge-reranker-v2-m3，
+大幅减小打包体积（不需要 torch，仅需 onnxruntime + transformers tokenizer）。
+支持延迟加载和离线缓存。
 """
 
 import logging
-import os
 import threading
+from pathlib import Path
 
-from ..utils.paths import VECTOR_DIR
+import numpy as np
+
 
 logger = logging.getLogger(__name__)
 
-os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-# Limit HuggingFace timeouts to fail fast when offline
-os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "10")
-os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "10")
-
-RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
-
-# Bundled model identifiers
-_RERANKER_ZIP = "reranker-model.zip"
-_RERANKER_MODEL_DIR = "reranker"  # flat directory, not HF cache format
-
-# Cache directory (shared with embedding)
-CACHE_DIR = VECTOR_DIR / "cache"
-
-MAX_LENGTH = 512
+RERANKER_MODEL = "onnx-community/bge-reranker-v2-m3-ONNX"
+_MAX_SEQ_LEN = 512
 
 _lock = threading.Lock()
-_reranker_model = None
-_reranker_tokenizer = None
+_session = None
+_tokenizer = None
 _load_error: Exception | None = None
 
+# Model file to use (quantized = best balance of quality vs size)
+_MODEL_FILE = "model_quantized.onnx"
 
-def _detect_device() -> str:
-    """检测最佳推理设备"""
-    import torch
-    if torch.cuda.is_available():
-        device = "cuda:0"
-        logger.info("Reranker 使用 GPU: %s", torch.cuda.get_device_name(0))
-        return device
-    logger.info("Reranker 使用 CPU")
-    return "cpu"
+
+def _resolve_model_dir() -> Path | None:
+    """Locate the ONNX model directory from Modelscope cache or local path."""
+    candidate_paths = [
+        Path.home() / ".cache" / "modelscope" / "onnx-community" / "bge-reranker-v2-m3-ONNX",
+        Path.home() / ".cache" / "huggingface" / "hub"
+        / "models--onnx-community--bge-reranker-v2-m3-ONNX" / "snapshots",
+    ]
+    for base in candidate_paths:
+        if base.is_dir():
+            if base.name == "snapshots" and any(base.iterdir()):
+                for snap in base.iterdir():
+                    onnx_dir = snap / "onnx"
+                    if (onnx_dir / _MODEL_FILE).exists():
+                        return onnx_dir
+            onnx_dir = base / "onnx"
+            if (onnx_dir / _MODEL_FILE).exists():
+                return onnx_dir
+            if (base / _MODEL_FILE).exists():
+                return base
+    return None
 
 
 def _load_reranker():
-    """延迟加载 reranker 模型和 tokenizer（线程安全）"""
-    global _reranker_model, _reranker_tokenizer, _load_error
+    """延迟加载 ONNX 模型和 tokenizer（线程安全）"""
+    global _session, _tokenizer, _load_error
 
-    if _reranker_model is not None:
-        return _reranker_model, _reranker_tokenizer
-    # Allow retries
+    if _session is not None:
+        return _session, _tokenizer
     _load_error = None
 
     with _lock:
-        if _reranker_model is not None:
-            return _reranker_model, _reranker_tokenizer
+        if _session is not None:
+            return _session, _tokenizer
 
         try:
-            from transformers import AutoModelForSequenceClassification, AutoTokenizer
-            from ..rag.bundled_models import extract_bundled_zip
-
-            logger.info("正在加载 Reranker 模型 %s ...", RERANKER_MODEL)
-
-            # Detect device
-            device = _detect_device()
-
-            # 1. Try bundled model (local path)
-            snapshot_path = extract_bundled_zip(
-                zip_name=_RERANKER_ZIP,
-                cache_dir=CACHE_DIR,
-                model_dir_name=_RERANKER_MODEL_DIR,
-                model_file="model.safetensors",
-            )
-            if snapshot_path:
-                logger.info("使用离线 Reranker 模型: %s", snapshot_path)
-                tokenizer = AutoTokenizer.from_pretrained(str(snapshot_path), local_files_only=True)
-                model = AutoModelForSequenceClassification.from_pretrained(
-                    str(snapshot_path), local_files_only=True,
+            model_dir = _resolve_model_dir()
+            if model_dir is None:
+                raise FileNotFoundError(
+                    "ONNX model not found. Download from:\n"
+                    "  https://www.modelscope.cn/models/onnx-community/bge-reranker-v2-m3-ONNX/files"
                 )
-                model.to(device).eval()
-                logger.info("离线 Reranker 模型加载完成 (device=%s)", device)
-                _reranker_model = model
-                _reranker_tokenizer = tokenizer
-                return _reranker_model, _reranker_tokenizer
 
-            # 2. Try offline cache
-            try:
-                os.environ["HF_HUB_OFFLINE"] = "1"
-                tokenizer = AutoTokenizer.from_pretrained(RERANKER_MODEL, local_files_only=True)
-                model = AutoModelForSequenceClassification.from_pretrained(
-                    RERANKER_MODEL, local_files_only=True,
-                )
-                model.to(device).eval()
-                logger.info("Reranker 模型从本地缓存加载完成 (device=%s)", device)
-                _reranker_model = model
-                _reranker_tokenizer = tokenizer
-                return _reranker_model, _reranker_tokenizer
-            except Exception:
-                logger.info("本地无 Reranker 模型缓存")
-            finally:
-                os.environ.pop("HF_HUB_OFFLINE", None)
+            onnx_path = model_dir / _MODEL_FILE
+            if not onnx_path.exists():
+                raise FileNotFoundError(f"ONNX model file not found: {onnx_path}")
 
-            # 3. Try mirrors
-            mirrors = [
-                "https://hf-mirror.com",
-                "https://huggingface.mrdoge.com",
+            # Find tokenizer.json
+            tokenizer_paths = [
+                model_dir / "tokenizer.json",
+                model_dir.parent / "tokenizer.json",
+                model_dir.parent.parent / "tokenizer.json",
             ]
-            last_err = None
-            for mirror in mirrors:
-                os.environ["HF_ENDPOINT"] = mirror
-                try:
-                    tokenizer = AutoTokenizer.from_pretrained(RERANKER_MODEL)
-                    model = AutoModelForSequenceClassification.from_pretrained(RERANKER_MODEL)
-                    model.to(device).eval()
-                    logger.info("Reranker 模型从 %s 加载完成 (device=%s)", mirror, device)
-                    _reranker_model = model
-                    _reranker_tokenizer = tokenizer
-                    return _reranker_model, _reranker_tokenizer
-                except Exception as e:
-                    logger.debug("从 %s 加载 reranker 失败: %s", mirror, e)
-                    last_err = e
-                    continue
+            tokenizer_path = next((p for p in tokenizer_paths if p.exists()), None)
+            if not tokenizer_path:
+                raise FileNotFoundError(f"tokenizer.json not found near {model_dir}")
 
-            # All mirrors failed
-            logger.warning("Reranker 模型不可用，搜索将使用混合排序")
-            _load_error = last_err or RuntimeError("Reranker 加载失败")
-            raise _load_error
+            logger.info("加载 ONNX Reranker 模型: %s (size=%d MB)", onnx_path, onnx_path.stat().st_size >> 20)
+
+            # Use HuggingFace tokenizers (Rust backend, no pytorch needed)
+            from tokenizers import Tokenizer as HFTokenizer
+            _tokenizer = HFTokenizer.from_file(str(tokenizer_path))
+
+            import onnxruntime
+            providers = ["CPUExecutionProvider"]
+            _session = onnxruntime.InferenceSession(str(onnx_path), providers=providers)
+
+            input_names = [i.name for i in _session.get_inputs()]
+            logger.info("ONNX Reranker 加载完成 (inputs=%s)", input_names)
+            return _session, _tokenizer
 
         except Exception as e:
             if e is not _load_error:
                 _load_error = e
-                logger.error("Reranker 模型加载失败: %s", e)
+                logger.error("ONNX Reranker 加载失败: %s", e)
             raise
+
+
+def _tokenize_with_tokenizers(tokenizer, query: str, texts: list[str], max_len: int):
+    """Tokenize query-text pairs using HuggingFace tokenizers library."""
+    tokenizer.enable_padding(pad_id=1, pad_type_id=0, length=max_len)
+    tokenizer.enable_truncation(max_len)
+    pairs = [[query, text] for text in texts]
+    encoded = tokenizer.encode_batch(pairs, add_special_tokens=True, is_pretokenized=False)
+    return {
+        "input_ids": np.array([e.ids for e in encoded], dtype=np.int64),
+        "attention_mask": np.array([e.attention_mask for e in encoded], dtype=np.int64),
+        "token_type_ids": np.zeros((len(encoded), max_len), dtype=np.int64),
+    }
 
 
 def rerank(query: str, texts: list[str], top_k: int | None = None) -> list[float]:
     """
-    对 query-doc 对计算相关性分数
+    对 query-doc 对计算相关性分数（ONNX Runtime 推理）
 
     Args:
         query: 查询文本
@@ -155,25 +131,20 @@ def rerank(query: str, texts: list[str], top_k: int | None = None) -> list[float
     if not texts:
         return []
 
-    model, tokenizer = _load_reranker()
-    device = next(model.parameters()).device
+    session, tokenizer = _load_reranker()
+    input_names = [i.name for i in session.get_inputs()]
 
-    pairs = [[query, t] for t in texts]
-    features = tokenizer(
-        pairs,
-        padding=True,
-        truncation=True,
-        max_length=MAX_LENGTH,
-        return_tensors="pt",
-    )
-    features = {k: v.to(device) for k, v in features.items()}
+    onnx_inputs = _tokenize_with_tokenizers(tokenizer, query, texts, _MAX_SEQ_LEN)
+    if "token_type_ids" not in input_names:
+        onnx_inputs.pop("token_type_ids", None)
 
-    import torch
-    with torch.inference_mode():
-        logits = model(**features).logits.squeeze(-1)
+    logits = session.run(None, onnx_inputs)[0]
 
-    scores = logits.tolist()
-    # Ensure list (single-item tensor -> float)
+    if logits.shape[1] >= 2:
+        scores = logits[:, 1].tolist()
+    else:
+        scores = logits[:, 0].tolist()
+
     if isinstance(scores, float):
         scores = [scores]
 
@@ -189,8 +160,7 @@ def rerank(query: str, texts: list[str], top_k: int | None = None) -> list[float
 
 
 def make_reranker_fn(top_k: int | None = None):
-    """
-    返回符合 scoring.py rank_candidates 签名的 reranker 函数
+    """返回符合 scoring.py rank_candidates 签名的 reranker 函数
 
     签名: (query: str, texts: list[str]) -> list[float]
     """

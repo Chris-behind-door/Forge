@@ -253,13 +253,15 @@ def search_similar(
         )
 
     # 第二阶段：CrossEncoder 精排
+    # Call reranker without top_k filter (all scores returned, including
+    # negatives), then sort and pick top_k ourselves.
     rerank_input = candidates[: top_k * 2]
     disable_reranker = os.environ.get("FORGE_DISABLE_RERANKER", "").strip().lower() in ("1", "true", "yes")
     if disable_reranker:
         logger.info("Reranker disabled by config, using hybrid scores")
         return candidates[:top_k]
     try:
-        reranker_fn = make_reranker_fn(top_k=top_k)
+        reranker_fn = make_reranker_fn(top_k=None)  # get ALL raw scores
         texts = [c["text"] for c in rerank_input]
         rerank_scores = reranker_fn(query, texts)
         for c, rs in zip(rerank_input, rerank_scores):
