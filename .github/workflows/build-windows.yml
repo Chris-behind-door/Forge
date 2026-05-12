@@ -60,7 +60,6 @@ jobs:
           .\.venv\Scripts\activate
           python -c "
           import os, zipfile
-          os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
           from pathlib import Path
           from huggingface_hub import snapshot_download
 
@@ -89,8 +88,6 @@ jobs:
 
           out = Path('reranker-onnx')
           out.mkdir(parents=True, exist_ok=True)
-
-          os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 
           # Download model_quantized.onnx from onnx/ subdir, tokenizer from root
           files = [
