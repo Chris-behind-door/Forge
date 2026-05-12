@@ -158,6 +158,24 @@ def _ocr_page(page: fitz.Page) -> str:
     return "\n".join(lines)
 
 
+def _page_needs_ocr(page: fitz.Page, direct_text: str) -> bool:
+    """Decide whether a page needs OCR based on image + text analysis.
+
+    A page needs OCR when it contains images but very little extractable
+    text — typical of scanned documents.  Native PDFs with real text
+    content (even if they also embed small figures) are left alone.
+    """
+    text_len = len(direct_text.strip())
+
+    # Sufficient text → no OCR needed regardless of images
+    if text_len >= MIN_TEXT_CHARS_FOR_SKIP_OCR:
+        return False
+
+    # Little text AND page has images → almost certainly a scan
+    has_images = len(page.get_images(full=True)) > 0
+    return has_images
+
+
 def _process_page_with_ocr(page: fitz.Page) -> str:
     """
     处理单个页面：先尝试直接提取，必要时 OCR
@@ -171,10 +189,10 @@ def _process_page_with_ocr(page: fitz.Page) -> str:
     # 先尝试直接提取
     direct_text = _extract_text_directly(page)
 
-    if len(direct_text.strip()) >= MIN_TEXT_CHARS_FOR_SKIP_OCR:
+    if not _page_needs_ocr(page, direct_text):
         return direct_text
 
-    # 文字太少，使用 OCR
+    # 文字太少且含图片，使用 OCR
     ocr_text = _ocr_page(page)
 
     # 取更好的结果
@@ -232,7 +250,7 @@ def parse_pdf_iter(
             page_idx = page_start + offset
             page = doc[page_idx]
             direct_text = _extract_text_directly(page)
-            if len(direct_text.strip()) >= MIN_TEXT_CHARS_FOR_SKIP_OCR:
+            if not _page_needs_ocr(page, direct_text):
                 pages_text[offset] = direct_text
             else:
                 pages_needing_ocr.append((offset, page))
