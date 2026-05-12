@@ -245,26 +245,32 @@ def parse_pdf_iter(
 
     chunk_id = 0
 
-    for page_start in range(0, total_pages, pages_per_batch):
-        page_end = min(page_start + pages_per_batch, total_pages)
-        pages_text: list[str] = [""] * (page_end - page_start)
-        pages_needing_ocr: list[tuple[int, object]] = []
+    # Build a single thread pool for all batches.  Reusing threads
+    # means OCR engines are created once per thread and cached in
+    # _ocr_engines, instead of creating new threads (and engines)
+    # for every batch.
+    num_workers = min(MAX_OCR_WORKERS, os.cpu_count() or 4)
+    ocr_executor = ThreadPoolExecutor(max_workers=num_workers)
 
-        for offset in range(page_end - page_start):
-            page_idx = page_start + offset
-            page = doc[page_idx]
-            direct_text = _extract_text_directly(page)
-            if not _page_needs_ocr(page, direct_text):
-                pages_text[offset] = direct_text
-            else:
-                pages_needing_ocr.append((offset, page))
+    try:
+        for page_start in range(0, total_pages, pages_per_batch):
+            page_end = min(page_start + pages_per_batch, total_pages)
+            pages_text: list[str] = [""] * (page_end - page_start)
+            pages_needing_ocr: list[tuple[int, object]] = []
 
-        # OCR for this batch
-        if pages_needing_ocr:
-            num_workers = min(MAX_OCR_WORKERS, len(pages_needing_ocr))
-            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            for offset in range(page_end - page_start):
+                page_idx = page_start + offset
+                page = doc[page_idx]
+                direct_text = _extract_text_directly(page)
+                if not _page_needs_ocr(page, direct_text):
+                    pages_text[offset] = direct_text
+                else:
+                    pages_needing_ocr.append((offset, page))
+
+            # OCR for this batch using the shared thread pool
+            if pages_needing_ocr:
                 future_to_offset = {
-                    executor.submit(_process_page_with_ocr, page): offset
+                    ocr_executor.submit(_process_page_with_ocr, page): offset
                     for offset, page in pages_needing_ocr
                 }
                 for future in as_completed(future_to_offset):
@@ -283,41 +289,43 @@ def parse_pdf_iter(
         del pages_text
 
         if not full_text.strip():
-            continue
+            del full_text
+        else:
+            chunks = splitter.split_text(full_text)
+            del full_text
 
-        chunks = splitter.split_text(full_text)
-        del full_text
+            # Extract page markers for this batch
+            page_markers: list[tuple[int, int]] = []
+            for i, chunk in enumerate(chunks):
+                match = re.search(r"\[第 (\d+) 页\]", chunk)
+                if match:
+                    page_markers.append((i, int(match.group(1))))
 
-        # Extract page markers for this batch
-        page_markers: list[tuple[int, int]] = []
-        for i, chunk in enumerate(chunks):
-            match = re.search(r"\[第 (\d+) 页\]", chunk)
-            if match:
-                page_markers.append((i, int(match.group(1))))
+            batch: list[dict] = []
+            for i, chunk in enumerate(chunks):
+                page_hint = None
+                match = re.search(r"\[第 (\d+) 页\]", chunk)
+                if match:
+                    page_hint = int(match.group(1))
+                else:
+                    for marker_idx, marker_page in reversed(page_markers):
+                        if marker_idx < i:
+                            page_hint = marker_page
+                            break
+                batch.append({
+                    "chunk_id": chunk_id,
+                    "text": chunk,
+                    "page": page_hint,
+                })
+                chunk_id += 1
 
-        batch: list[dict] = []
-        for i, chunk in enumerate(chunks):
-            page_hint = None
-            match = re.search(r"\[第 (\d+) 页\]", chunk)
-            if match:
-                page_hint = int(match.group(1))
-            else:
-                for marker_idx, marker_page in reversed(page_markers):
-                    if marker_idx < i:
-                        page_hint = marker_page
-                        break
-            batch.append({
-                "chunk_id": chunk_id,
-                "text": chunk,
-                "page": page_hint,
-            })
-            chunk_id += 1
-
-        yield batch
+            yield batch
+    finally:
+        ocr_executor.shutdown(wait=True)
+        doc.close()
 
     elapsed = (datetime.now() - start_time).total_seconds()
     logger.info(
         "[PDF解析] 总页数: %d, 分批处理完成, 耗时: %.2fs",
         total_pages, elapsed,
     )
-    doc.close()
