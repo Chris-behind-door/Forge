@@ -10,6 +10,19 @@ from src.main import app
 import uvicorn
 
 if __name__ == "__main__":
+    # Required for PyInstaller + multiprocessing spawn
+    import multiprocessing as mp
+    mp.freeze_support()
+
+    # Filter out multiprocessing-spawn arguments so argparse doesn't choke
+    import sys
+    sys.argv = [sys.argv[0]] + [
+        a for a in sys.argv[1:]
+        if not a.startswith("--multiprocessing-fork")
+        and "parent_pid" not in a
+        and "pipe_handle" not in a
+    ]
+
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=None)
