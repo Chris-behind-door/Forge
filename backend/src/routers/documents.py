@@ -46,6 +46,11 @@ async def reprocess_all_documents() -> dict:
     return await ds.reprocess_all()
 
 
+@router.get("/queue-status")
+async def get_queue_status() -> dict:
+    return ds.queue_status()
+
+
 @router.get("/{doc_id}", response_model=ds.Document)
 async def get_document(doc_id: str) -> ds.Document:
     return ds.get(doc_id)

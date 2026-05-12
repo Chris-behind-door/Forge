@@ -536,44 +536,12 @@ def parse_chm(
             elif child.is_file() and child.suffix.lower() in (".htm", ".html"):
                 root_htmls.append(child)
 
-        # ---- 阶段 2：按文档分组提取 ----
-        # 每个 section: (parent_title, chapter_title, location, text)
-        sections: list[tuple[str | None, str | None, str | None, str]] = []
+        # ---- 阶段 2+3：逐文档流式提取+分块 ----
+        # Process one subdirectory ("document") at a time, split into
+        # chunks immediately, and discard the raw text before moving on.
+        # This keeps peak memory proportional to the largest subdirectory
+        # rather than the entire CHM.
 
-        for subdir in subdirs:
-            parent_title = subdir.name
-            html_files = _find_html_files(str(subdir))
-
-            if not html_files:
-                continue
-
-            for html_file in html_files:
-                try:
-                    location, text, chapter_title = _process_html_file(
-                        html_file, extract_dir
-                    )
-                    if text.strip():
-                        sections.append((parent_title, chapter_title, location, text))
-                except Exception as e:
-                    logger.warning("Failed to parse HTML %s: %s", html_file, e)
-                    continue
-
-        for html_file in root_htmls:
-            try:
-                location, text, chapter_title = _process_html_file(
-                    html_file, extract_dir
-                )
-                if text.strip():
-                    sections.append((None, chapter_title, location, text))
-            except Exception as e:
-                logger.warning("Failed to parse HTML %s: %s", html_file, e)
-                continue
-
-        if not sections:
-            logger.info("No valid text extracted from CHM: %s", chm_path)
-            return []
-
-        # ---- 阶段 3：按章节分块（保留层级标记） ----
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
@@ -582,22 +550,80 @@ def parse_chm(
 
         result: list[dict] = []
         chunk_id = 0
+        total_sections = 0
 
-        for parent_title, chapter_title, location, text in sections:
-            # 构建层级标记前缀
-            header_parts: list[str] = []
-            if parent_title:
+        for subdir in subdirs:
+            parent_title = subdir.name
+            html_files = _find_html_files(str(subdir))
+
+            if not html_files:
+                continue
+
+            dir_sections: list[tuple[str | None, str | None, str, str]] = []
+            for html_file in html_files:
+                try:
+                    location, text, chapter_title = _process_html_file(
+                        html_file, extract_dir
+                    )
+                    if text.strip():
+                        dir_sections.append((chapter_title, location, text, parent_title))
+                except Exception as e:
+                    logger.warning("Failed to parse HTML %s: %s", html_file, e)
+                    continue
+
+            # Split + build chunks for this subdirectory
+            for chapter_title, location, text, _parent in dir_sections:
+                header_parts: list[str] = []
                 header_parts.append(f"[文档: {parent_title}]")
+                if chapter_title:
+                    header_parts.append(f"[章节: {chapter_title}]")
+                if location:
+                    header_parts.append(f"[位置: {location}]")
+                header = "\n".join(header_parts)
+
+                chunks = splitter.split_text(text)
+                for ci, chunk_text in enumerate(chunks):
+                    if ci == 0:
+                        full_text = f"{header}\n{chunk_text}" if header else chunk_text
+                    else:
+                        loc_tag = f"[位置: {location}]" if location else ""
+                        full_text = f"{loc_tag}\n{chunk_text}" if loc_tag else chunk_text
+
+                    result.append({
+                        "chunk_id": chunk_id,
+                        "text": full_text,
+                        "page": None,
+                        "location": location,
+                        "parent_title": parent_title,
+                        "chapter": chapter_title,
+                    })
+                    chunk_id += 1
+
+            total_sections += len(dir_sections)
+            del dir_sections
+
+        # Root-level HTML files (no parent)
+        root_sections: list[tuple[str | None, str | None, str]] = []
+        for html_file in root_htmls:
+            try:
+                location, text, chapter_title = _process_html_file(
+                    html_file, extract_dir
+                )
+                if text.strip():
+                    root_sections.append((chapter_title, location, text))
+            except Exception as e:
+                logger.warning("Failed to parse HTML %s: %s", html_file, e)
+                continue
+
+        for chapter_title, location, text in root_sections:
+            header_parts: list[str] = []
             if chapter_title:
                 header_parts.append(f"[章节: {chapter_title}]")
             if location:
                 header_parts.append(f"[位置: {location}]")
-
             header = "\n".join(header_parts)
 
-            # 对章节文本分块
             chunks = splitter.split_text(text)
-
             for ci, chunk_text in enumerate(chunks):
                 if ci == 0:
                     full_text = f"{header}\n{chunk_text}" if header else chunk_text
@@ -605,23 +631,28 @@ def parse_chm(
                     loc_tag = f"[位置: {location}]" if location else ""
                     full_text = f"{loc_tag}\n{chunk_text}" if loc_tag else chunk_text
 
-                result.append(
-                    {
-                        "chunk_id": chunk_id,
-                        "text": full_text,
-                        "page": None,
-                        "location": location,
-                        "parent_title": parent_title,
-                        "chapter": chapter_title,
-                    }
-                )
+                result.append({
+                    "chunk_id": chunk_id,
+                    "text": full_text,
+                    "page": None,
+                    "location": location,
+                    "parent_title": None,
+                    "chapter": chapter_title,
+                })
                 chunk_id += 1
+
+        total_sections += len(root_sections)
+        del root_sections
+
+        if not result:
+            logger.info("No valid text extracted from CHM: %s", chm_path)
+            return []
 
         logger.info(
             "%s: %d docs, %d sections, %d chunks",
             chm_p.name,
             len(subdirs),
-            len(sections),
+            total_sections,
             len(result),
         )
         return result

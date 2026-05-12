@@ -10,7 +10,7 @@ interface Document {
   size: number
   file_type: 'pdf' | 'chm'
   uploaded_at: string
-  status: 'pending' | 'processing' | 'ready' | 'error'
+  status: 'pending' | 'processing' | 'ready' | 'error' | 'queued'
   chunk_count: number | null
   project_id: string | null
 }
@@ -23,6 +23,7 @@ const formatFileSize = (bytes: number): string => {
 
 const statusConfig: Record<string, { color: string; text: string }> = {
   pending: { color: 'default', text: '等待处理' },
+  queued: { color: 'warning', text: '排队中' },
   processing: { color: 'processing', text: '处理中...' },
   ready: { color: 'success', text: '已就绪' },
   error: { color: 'error', text: '处理失败' },

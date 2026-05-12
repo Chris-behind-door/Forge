@@ -86,7 +86,22 @@ def _calculate_file_hash(file_path: Path, chunk_size: int = 8192) -> str:
 
 # ── Processing tasks ──
 
-_processing_tasks: dict[str, asyncio.Task] = {}
+# ── Memory-budgeted concurrent processing queue ──
+#
+# Phase 1: simple concurrency cap.  Phase 2 (after profiling with real
+# data) will add psutil-based dynamic memory budgeting.
+
+class _QueueItem(BaseModel):
+    doc_id: str
+    stored_path: str
+    file_type: str = "pdf"
+
+_MAX_CONCURRENT = 2  # hard cap on parallel processing tasks
+
+_doc_queue: asyncio.Queue[_QueueItem] = asyncio.Queue()
+_queue_worker_started = False
+_running: set[str] = set()       # doc_ids currently being processed
+_concurrency_sem: asyncio.Semaphore | None = None
 
 
 def _delete_doc_chunks(doc_id: str) -> int:
@@ -106,37 +121,45 @@ async def process_document(doc_id: str, stored_path: str, file_type: str = "pdf"
     doc = metadata[doc_id]
 
     try:
+        import os as _os
+        import psutil as _psutil
+        _proc = _psutil.Process(_os.getpid())
+        def _log_rss(label: str) -> None:
+            rss = _proc.memory_info().rss / (1024 ** 2)
+            logger.info(f"[{doc_id[:8]}] MEM [{label}] RSS={rss:.0f} MB")
+    except ImportError:
+        def _log_rss(label: str) -> None: pass
+
+    try:
         doc.status = "processing"
         _save_metadata(metadata)
-        logger.info(f"[{doc_id[:8]}] 状态更新: processing")
+        file_size_mb = Path(stored_path).stat().st_size >> 20
+        _log_rss(f"start ({file_type}, {file_size_mb} MB)")
 
-        from ..parsers.chm import parse_chm
-        from ..parsers.pdf import parse_pdf
-        from ..rag.vector_store import add_chunks
+        from .doc_worker import run_in_subprocess
 
-        step_start = datetime.now()
-        parser_func = parse_chm if file_type == "chm" else parse_pdf
         loop = asyncio.get_event_loop()
-        chunks = await loop.run_in_executor(None, parser_func, stored_path)
-        elapsed = (datetime.now() - step_start).total_seconds()
-        logger.info(f"[{doc_id[:8]}] 解析完成: {len(chunks)} 个分块, 耗时 {elapsed:.2f}s")
-
-        step_start = datetime.now()
-        logger.info(f"[{doc_id[:8]}] 开始向量化...")
-        chunk_count = await loop.run_in_executor(
-            None, add_chunks, doc_id, chunks, doc.project_id,
+        result = await loop.run_in_executor(
+            None, run_in_subprocess, stored_path, file_type, doc_id, doc.project_id,
         )
-        elapsed = (datetime.now() - step_start).total_seconds()
-        logger.info(f"[{doc_id[:8]}] 向量化完成: {chunk_count} 个向量, 耗时 {elapsed:.2f}s")
+
+        if result.get("error"):
+            raise RuntimeError(result["error"])
+
+        child_peak = result.get("child_rss_peak_mb", "?")
+        _log_rss(
+            f"done (child peak={child_peak} MB, "
+            f"parse={result.get('parse_time_s','?')}s, "
+            f"embed={result.get('embed_time_s','?')}s, "
+            f"total={result.get('total_time_s','?')}s, "
+            f"{result.get('chunk_count',0)} chunks)"
+        )
 
         metadata = _load_metadata()
         if doc_id in metadata:
-            metadata[doc_id].chunk_count = chunk_count
+            metadata[doc_id].chunk_count = result.get("vectors", result.get("chunk_count", 0))
             metadata[doc_id].status = "ready"
             _save_metadata(metadata)
-
-        total_elapsed = (datetime.now() - start_time).total_seconds()
-        logger.info(f"[{doc_id[:8]}] 处理完成, 总耗时 {total_elapsed:.2f}s")
 
     except asyncio.CancelledError:
         logger.info(f"[{doc_id[:8]}] 任务被取消，清理状态")
@@ -146,7 +169,7 @@ async def process_document(doc_id: str, stored_path: str, file_type: str = "pdf"
             _save_metadata(metadata)
         raise
     except Exception as e:
-        logger.info(f"[{doc_id[:8]}] 处理失败: {e}")
+        logger.error(f"[{doc_id[:8]}] 处理失败: {e}")
         metadata = _load_metadata()
         if doc_id in metadata:
             metadata[doc_id].status = "error"
@@ -154,33 +177,110 @@ async def process_document(doc_id: str, stored_path: str, file_type: str = "pdf"
         raise
 
 
+def _get_sem() -> asyncio.Semaphore:
+    global _concurrency_sem
+    if _concurrency_sem is None:
+        _concurrency_sem = asyncio.Semaphore(_MAX_CONCURRENT)
+    return _concurrency_sem
+
+
+def _ensure_worker() -> None:
+    """Start the queue worker if not already running."""
+    global _queue_worker_started
+    if not _queue_worker_started:
+        asyncio.create_task(_queue_worker())
+        _queue_worker_started = True
+
+
+async def _queue_worker() -> None:
+    """Dispatch queue items up to the concurrency limit."""
+    global _queue_worker_started
+    try:
+        while True:
+            item = await _doc_queue.get()
+            sem = _get_sem()
+            await sem.acquire()
+            _running.add(item.doc_id)
+            logger.info(
+                f"[{item.doc_id[:8]}] 开始处理 "
+                f"(并发: {len(_running)}/{_MAX_CONCURRENT}, "
+                f"队列剩余: {_doc_queue.qsize()})"
+            )
+            asyncio.create_task(
+                _run_item(item), name=f"doc-proc-{item.doc_id[:8]}"
+            )
+    except asyncio.CancelledError:
+        _queue_worker_started = False
+
+
+async def _run_item(item: _QueueItem) -> None:
+    """Process one item and release the concurrency slot."""
+    sem = _get_sem()
+    try:
+        await process_document(item.doc_id, item.stored_path, item.file_type)
+    except Exception:
+        logger.exception(f"[{item.doc_id[:8]}] 处理异常")
+    finally:
+        _running.discard(item.doc_id)
+        sem.release()
+        _doc_queue.task_done()
+
+
 def start_processing(doc_id: str, stored_path: str, file_type: str = "pdf") -> None:
-    if doc_id in _processing_tasks:
-        existing = _processing_tasks[doc_id]
-        if not existing.done():
-            existing.cancel()
-    task = asyncio.create_task(process_document(doc_id, stored_path, file_type))
-    _processing_tasks[doc_id] = task
+    """Enqueue a document for concurrent processing."""
+    metadata = _load_metadata()
+    if doc_id in metadata:
+        metadata[doc_id].status = "queued"
+        _save_metadata(metadata)
+    _doc_queue.put_nowait(_QueueItem(
+        doc_id=doc_id, stored_path=stored_path, file_type=file_type,
+    ))
+    logger.info(f"[{doc_id[:8]}] 已加入处理队列 (队列深度: {_doc_queue.qsize()})")
+    _ensure_worker()
 
 
 def cancel_processing(doc_id: str) -> bool:
-    if doc_id in _processing_tasks:
-        task = _processing_tasks[doc_id]
-        if not task.done():
-            task.cancel()
-            logger.info(f"[{doc_id[:8]}] 已发送取消信号")
-            return True
-    return False
+    """Cancel a queued or actively processing document."""
+    # Try to remove from queue
+    temp: list[_QueueItem] = []
+    found = False
+    while not _doc_queue.empty():
+        try:
+            item = _doc_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+        if item.doc_id == doc_id:
+            found = True
+            logger.info(f"[{doc_id[:8]}] 已从队列移除")
+            # Reset status
+            metadata = _load_metadata()
+            if doc_id in metadata:
+                metadata[doc_id].status = "pending"
+                _save_metadata(metadata)
+        else:
+            temp.append(item)
+    for item in temp:
+        _doc_queue.put_nowait(item)
+    return found
+
+
+def queue_status() -> dict:
+    """Return current queue and concurrency status."""
+    return {
+        "queue_depth": _doc_queue.qsize(),
+        "running": list(_running),
+        "concurrency_limit": _MAX_CONCURRENT,
+    }
 
 
 async def resume_pending_documents() -> None:
     metadata = _load_metadata()
     for doc_id, doc in metadata.items():
-        if doc.status in ("pending", "processing"):
+        if doc.status in ("pending", "processing", "queued"):
             stored_path = Path(doc.stored_path)
             if stored_path.exists():
                 logger.info(f"[{doc_id[:8]}] 恢复处理: {doc.name} (状态: {doc.status})")
-                if doc.status == "processing":
+                if doc.status in ("processing", "queued"):
                     metadata[doc_id].status = "pending"
                     _save_metadata(metadata)
                 start_processing(doc_id, str(stored_path), doc.file_type)

@@ -16,7 +16,7 @@ interface Document {
   size: number
   file_type: 'pdf' | 'chm'
   uploaded_at: string
-  status: 'pending' | 'processing' | 'ready' | 'error'
+  status: 'pending' | 'processing' | 'ready' | 'error' | 'queued'
   chunk_count: number | null
   project_id: string | null
 }
@@ -72,7 +72,7 @@ function KnowledgeBaseView({ sharedProjects }: KnowledgeBaseViewProps) {
   }, [waitForBackend, selectedProjectId])
 
   // Polling
-  const hasProcessingDocs = documents.some(d => d.status === 'pending' || d.status === 'processing')
+  const hasProcessingDocs = documents.some(d => d.status === 'pending' || d.status === 'processing' || d.status === 'queued')
   useEffect(() => {
     if (!hasProcessingDocs) return
     const interval = setInterval(() => fetchDocuments(false), 2000)
