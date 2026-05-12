@@ -13,6 +13,7 @@ PDF 解析模块
 """
 
 import atexit
+import logging
 import os
 import re
 import threading
@@ -24,12 +25,17 @@ import fitz  # PyMuPDF
 import numpy as np
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+logger = logging.getLogger(__name__)
+
 # 强制离线模式（国内网络环境）
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
-# 判断是否需要 OCR 的阈值：每页最少字符数
-MIN_TEXT_CHARS_FOR_SKIP_OCR = 50
+# Minimum ratio of extractable text to page area to skip OCR.
+# Pages with very little direct text (headers, footers, page numbers)
+# but mostly images/formulas still need OCR.  A page with < 200 chars
+# of direct text is almost certainly missing most of its content.
+MIN_TEXT_CHARS_FOR_SKIP_OCR = 200
 
 # 并行 OCR 的最大线程数
 MAX_OCR_WORKERS = min(4, (os.cpu_count() or 4))
@@ -52,10 +58,17 @@ atexit.register(_cleanup_ocr_engines)
 
 def _get_ocr_engine():
     """获取当前线程的 OCR 引擎（线程安全，首次调用时才 import rapidocr）"""
-    from rapidocr_onnxruntime import RapidOCR
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+    except ImportError as e:
+        raise RuntimeError(
+            f"OCR engine not available (rapidocr_onnxruntime import failed: {e}). "
+            "PDF pages requiring OCR will be skipped."
+        ) from e
     thread_id = threading.get_ident()
     with _ocr_lock:
         if thread_id not in _ocr_engines:
+            logger.info("Initializing OCR engine for thread %s", thread_id)
             _ocr_engines[thread_id] = RapidOCR()
         return _ocr_engines[thread_id]
 
@@ -237,7 +250,7 @@ def parse_pdf_iter(
                     try:
                         pages_text[offset] = future.result()
                     except Exception as e:
-                        print(f"[PDF解析] 页面 {page_start + offset + 1} OCR 失败: {e}")
+                        logger.warning("页面 %d OCR 失败: %s", page_start + offset + 1, e)
 
         # Build text with page markers
         full_text = ""
@@ -281,8 +294,8 @@ def parse_pdf_iter(
         yield batch
 
     elapsed = (datetime.now() - start_time).total_seconds()
-    print(
-        f"[PDF解析] 总页数: {total_pages}, "
-        f"分批处理完成, 耗时: {elapsed:.2f}s"
+    logger.info(
+        "[PDF解析] 总页数: %d, 分批处理完成, 耗时: %.2fs",
+        total_pages, elapsed,
     )
     doc.close()
