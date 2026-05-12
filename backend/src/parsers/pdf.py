@@ -68,6 +68,10 @@ def _get_ocr_engine():
     thread_id = threading.get_ident()
     with _ocr_lock:
         if thread_id not in _ocr_engines:
+            # Limit cache: keep at most MAX_OCR_WORKERS engines
+            while len(_ocr_engines) >= MAX_OCR_WORKERS:
+                oldest_tid = next(iter(_ocr_engines))
+                del _ocr_engines[oldest_tid]
             logger.info("Initializing OCR engine for thread %s", thread_id)
             _ocr_engines[thread_id] = RapidOCR()
         return _ocr_engines[thread_id]
