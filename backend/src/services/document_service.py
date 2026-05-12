@@ -145,6 +145,20 @@ async def process_document(doc_id: str, stored_path: str, file_type: str = "pdf"
         if result.get("error"):
             raise RuntimeError(result["error"])
 
+        # Rebuild FTS index in parent process (subprocess may have created
+        # a stale index that only covers its own data)
+        try:
+            from ..rag.vector_store import get_db, CHUNKS_TABLE, FTS_INDEX_NAME
+            db = get_db()
+            if CHUNKS_TABLE in db.table_names():
+                table = db.open_table(CHUNKS_TABLE)
+                index_names = [idx.name for idx in table.list_indices()]
+                if FTS_INDEX_NAME in index_names:
+                    table.create_fts_index("text", replace=True)
+                    logger.info(f"[{doc_id[:8]}] FTS index rebuilt")
+        except Exception as fts_err:
+            logger.warning(f"[{doc_id[:8]}] FTS index rebuild failed: {fts_err}")
+
         child_peak = result.get("child_rss_peak_mb", "?")
         _log_rss(
             f"done (child peak={child_peak} MB, "
