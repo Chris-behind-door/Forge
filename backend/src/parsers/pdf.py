@@ -280,46 +280,46 @@ def parse_pdf_iter(
                     except Exception as e:
                         logger.warning("页面 %d OCR 失败: %s", page_start + offset + 1, e)
 
-        # Build text with page markers
-        full_text = ""
-        for offset, text in enumerate(pages_text):
-            full_text += f"\n\n[第 {page_start + offset + 1} 页]\n\n{text}"
-        full_text = full_text.strip()
+            # Build text with page markers
+            full_text = ""
+            for offset, text in enumerate(pages_text):
+                full_text += f"\n\n[第 {page_start + offset + 1} 页]\n\n{text}"
+            full_text = full_text.strip()
 
-        del pages_text
+            del pages_text
 
-        if not full_text.strip():
-            del full_text
-        else:
-            chunks = splitter.split_text(full_text)
-            del full_text
+            if not full_text.strip():
+                del full_text
+            else:
+                chunks = splitter.split_text(full_text)
+                del full_text
 
-            # Extract page markers for this batch
-            page_markers: list[tuple[int, int]] = []
-            for i, chunk in enumerate(chunks):
-                match = re.search(r"\[第 (\d+) 页\]", chunk)
-                if match:
-                    page_markers.append((i, int(match.group(1))))
+                # Extract page markers for this batch
+                page_markers: list[tuple[int, int]] = []
+                for i, chunk in enumerate(chunks):
+                    match = re.search(r"\[第 (\d+) 页\]", chunk)
+                    if match:
+                        page_markers.append((i, int(match.group(1))))
 
-            batch: list[dict] = []
-            for i, chunk in enumerate(chunks):
-                page_hint = None
-                match = re.search(r"\[第 (\d+) 页\]", chunk)
-                if match:
-                    page_hint = int(match.group(1))
-                else:
-                    for marker_idx, marker_page in reversed(page_markers):
-                        if marker_idx < i:
-                            page_hint = marker_page
-                            break
-                batch.append({
-                    "chunk_id": chunk_id,
-                    "text": chunk,
-                    "page": page_hint,
-                })
-                chunk_id += 1
+                batch: list[dict] = []
+                for i, chunk in enumerate(chunks):
+                    page_hint = None
+                    match = re.search(r"\[第 (\d+) 页\]", chunk)
+                    if match:
+                        page_hint = int(match.group(1))
+                    else:
+                        for marker_idx, marker_page in reversed(page_markers):
+                            if marker_idx < i:
+                                page_hint = marker_page
+                                break
+                    batch.append({
+                        "chunk_id": chunk_id,
+                        "text": chunk,
+                        "page": page_hint,
+                    })
+                    chunk_id += 1
 
-            yield batch
+                yield batch
     finally:
         ocr_executor.shutdown(wait=True)
         doc.close()
