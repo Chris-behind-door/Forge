@@ -111,7 +111,6 @@ def _delete_doc_chunks(doc_id: str) -> int:
 
 
 async def process_document(doc_id: str, stored_path: str, file_type: str = "pdf") -> None:
-    start_time = datetime.now()
     logger.info(f"[{doc_id[:8]}] 开始处理文档 (类型: {file_type})")
 
     metadata = _load_metadata()

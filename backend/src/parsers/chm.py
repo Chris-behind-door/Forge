@@ -26,6 +26,8 @@ CHM 解析模块
 
 import os
 import re
+from collections.abc import Generator
+
 import shutil
 import subprocess
 import logging
@@ -495,170 +497,14 @@ def parse_chm(
     chunk_size: int = 500,
     chunk_overlap: int = 50,
 ) -> list[dict]:
+    """解析 CHM 文件，返回所有分块。
+
+    详见 :func:`parse_chm_iter` 的文档了解层级策略。
     """
-    解析 CHM 文件：解压 + 层级识别 + HTML提取 + 分块
-
-    层级策略：
-    - 一级子目录 → "文档"（parent），目录名即文档标题
-    - 每个 HTML 文件 → "章节"（chapter），从 <title> 或 <h1> 提取标题
-    - 根目录下的 HTML → 扁平处理，无 parent
-
-    每个 chunk 的 text 前会加上层级标记：
-      [文档: 建筑抗震设计规范[附条文说明]]
-      [章节: 5.2 场地抗震性能评价]
-      [位置: 建筑抗震设计规范/005.html]
-      实际内容...
-
-    Args:
-        chm_path: CHM 文件路径
-        chunk_size: 目标分块大小（字符数）
-        chunk_overlap: 分块重叠大小（字符数）
-
-    Returns:
-        分块列表
-    """
-    chm_p = Path(chm_path)
-    extract_dir = chm_p.parent / f"{chm_p.stem}_extracted"
-    if extract_dir.exists():
-        shutil.rmtree(extract_dir)
-
-    try:
-        if not _extract_chm(chm_path, str(extract_dir)):
-            raise RuntimeError(f"无法解压 CHM 文件: {chm_path}")
-
-        # ---- 阶段 1：识别层级结构 ----
-        subdirs: list[Path] = []
-        root_htmls: list[Path] = []
-
-        for child in sorted(extract_dir.iterdir()):
-            if child.is_dir() and not _is_system_dir(child.name):
-                subdirs.append(child)
-            elif child.is_file() and child.suffix.lower() in (".htm", ".html"):
-                root_htmls.append(child)
-
-        # ---- 阶段 2+3：逐文档流式提取+分块 ----
-        # Process one subdirectory ("document") at a time, split into
-        # chunks immediately, and discard the raw text before moving on.
-        # This keeps peak memory proportional to the largest subdirectory
-        # rather than the entire CHM.
-
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separators=["\n\n", "\n", "。", "；", "，", " ", ""],
-        )
-
-        result: list[dict] = []
-        chunk_id = 0
-        total_sections = 0
-
-        for subdir in subdirs:
-            parent_title = subdir.name
-            html_files = _find_html_files(str(subdir))
-
-            if not html_files:
-                continue
-
-            dir_sections: list[tuple[str | None, str | None, str, str]] = []
-            for html_file in html_files:
-                try:
-                    location, text, chapter_title = _process_html_file(
-                        html_file, extract_dir
-                    )
-                    if text.strip():
-                        dir_sections.append((chapter_title, location, text, parent_title))
-                except Exception as e:
-                    logger.warning("Failed to parse HTML %s: %s", html_file, e)
-                    continue
-
-            # Split + build chunks for this subdirectory
-            for chapter_title, location, text, _parent in dir_sections:
-                header_parts: list[str] = []
-                header_parts.append(f"[文档: {parent_title}]")
-                if chapter_title:
-                    header_parts.append(f"[章节: {chapter_title}]")
-                if location:
-                    header_parts.append(f"[位置: {location}]")
-                header = "\n".join(header_parts)
-
-                chunks = splitter.split_text(text)
-                for ci, chunk_text in enumerate(chunks):
-                    if ci == 0:
-                        full_text = f"{header}\n{chunk_text}" if header else chunk_text
-                    else:
-                        loc_tag = f"[位置: {location}]" if location else ""
-                        full_text = f"{loc_tag}\n{chunk_text}" if loc_tag else chunk_text
-
-                    result.append({
-                        "chunk_id": chunk_id,
-                        "text": full_text,
-                        "page": None,
-                        "location": location,
-                        "parent_title": parent_title,
-                        "chapter": chapter_title,
-                    })
-                    chunk_id += 1
-
-            total_sections += len(dir_sections)
-            del dir_sections
-
-        # Root-level HTML files (no parent)
-        root_sections: list[tuple[str | None, str | None, str]] = []
-        for html_file in root_htmls:
-            try:
-                location, text, chapter_title = _process_html_file(
-                    html_file, extract_dir
-                )
-                if text.strip():
-                    root_sections.append((chapter_title, location, text))
-            except Exception as e:
-                logger.warning("Failed to parse HTML %s: %s", html_file, e)
-                continue
-
-        for chapter_title, location, text in root_sections:
-            header_parts: list[str] = []
-            if chapter_title:
-                header_parts.append(f"[章节: {chapter_title}]")
-            if location:
-                header_parts.append(f"[位置: {location}]")
-            header = "\n".join(header_parts)
-
-            chunks = splitter.split_text(text)
-            for ci, chunk_text in enumerate(chunks):
-                if ci == 0:
-                    full_text = f"{header}\n{chunk_text}" if header else chunk_text
-                else:
-                    loc_tag = f"[位置: {location}]" if location else ""
-                    full_text = f"{loc_tag}\n{chunk_text}" if loc_tag else chunk_text
-
-                result.append({
-                    "chunk_id": chunk_id,
-                    "text": full_text,
-                    "page": None,
-                    "location": location,
-                    "parent_title": None,
-                    "chapter": chapter_title,
-                })
-                chunk_id += 1
-
-        total_sections += len(root_sections)
-        del root_sections
-
-        if not result:
-            logger.info("No valid text extracted from CHM: %s", chm_path)
-            return []
-
-        logger.info(
-            "%s: %d docs, %d sections, %d chunks",
-            chm_p.name,
-            len(subdirs),
-            total_sections,
-            len(result),
-        )
-        return result
-
-    finally:
-        pass  # 解压目录保留，用于后续 CHM HTML 查看
+    result: list[dict] = []
+    for batch in parse_chm_iter(chm_path, chunk_size, chunk_overlap):
+        result.extend(batch)
+    return result
 
 
 def parse_chm_iter(
@@ -666,7 +512,7 @@ def parse_chm_iter(
     chunk_size: int = 500,
     chunk_overlap: int = 50,
     yield_every: int = 50,
-) -> "Generator[list[dict], None, None]":
+) -> Generator[list[dict], None, None]:
     """Streaming variant of parse_chm.
 
     Yields batches of chunks (up to ``yield_every`` chunks each) so the
@@ -674,8 +520,6 @@ def parse_chm_iter(
     Peak memory stays proportional to the largest subdirectory instead
     of the entire CHM.
     """
-    from collections.abc import Generator
-
     chm_p = Path(chm_path)
     extract_dir = chm_p.parent / f"{chm_p.stem}_extracted"
     if extract_dir.exists():

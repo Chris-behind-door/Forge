@@ -15,8 +15,6 @@ This caps peak memory at one batch + the embedding model (~2GB).
 import logging
 import multiprocessing as mp
 import os
-import sys
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 

@@ -16,6 +16,7 @@ import atexit
 import os
 import re
 import threading
+from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
@@ -175,130 +176,13 @@ def parse_pdf(
     chunk_size: int = 500,
     chunk_overlap: int = 50,
 ) -> list[dict]:
+    """解析 PDF 文件，返回所有分块。
+
+    详见 :func:`parse_pdf_iter` 的文档了解性能优化策略。
     """
-    解析 PDF 文件：文字提取/OCR + 分块
-
-    性能优化：
-    - 原生 PDF 直接提取，跳过 OCR
-    - OCR 页面使用线程池并行处理
-    - 动态调整线程数
-
-    Args:
-        pdf_path: PDF 文件路径
-        chunk_size: 目标分块大小（字符数）
-        chunk_overlap: 分块重叠大小（字符数）
-
-    Returns:
-        分块列表
-    """
-    start_time = datetime.now()
-
-    doc = fitz.open(pdf_path)
-    total_pages = doc.page_count
-
-    # ========== 第一遍：快速扫描，识别需要 OCR 的页面 ==========
-    pages_needing_ocr = []
-    pages_text = ["" for _ in range(total_pages)]
-
-    for i in range(total_pages):
-        page = doc[i]
-        direct_text = _extract_text_directly(page)
-
-        if len(direct_text.strip()) >= MIN_TEXT_CHARS_FOR_SKIP_OCR:
-            pages_text[i] = direct_text
-        else:
-            pages_needing_ocr.append(i)
-
-    scan_elapsed = (datetime.now() - start_time).total_seconds()
-
-    # ========== 第二遍：并行处理需要 OCR 的页面 ==========
-    if pages_needing_ocr:
-        ocr_start = datetime.now()
-
-        # 准备任务
-        pages_to_process = [(i, doc[i]) for i in pages_needing_ocr]
-
-        # 使用线程池并行处理
-        num_workers = min(MAX_OCR_WORKERS, len(pages_needing_ocr))
-
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            # 提交所有任务
-            future_to_idx = {
-                executor.submit(_process_page_with_ocr, page): idx
-                for idx, page in pages_to_process
-            }
-
-            # 收集结果
-            for future in as_completed(future_to_idx):
-                idx = future_to_idx[future]
-                try:
-                    pages_text[idx] = future.result()
-                except Exception as e:
-                    print(f"[PDF解析] 页面 {idx + 1} OCR 失败: {e}")
-                    # 使用之前直接提取的结果（如果有）
-
-        ocr_elapsed = (datetime.now() - ocr_start).total_seconds()
-    else:
-        ocr_elapsed = 0
-
-    doc.close()
-
-    total_elapsed = (datetime.now() - start_time).total_seconds()
-
-    # 性能日志
-    if total_elapsed > 1.0:
-        print(
-            f"[PDF解析] 总页数: {total_pages}, OCR页数: {len(pages_needing_ocr)}, "
-            f"扫描: {scan_elapsed:.2f}s, OCR: {ocr_elapsed:.2f}s, "
-            f"总计: {total_elapsed:.2f}s"
-        )
-
-    # ========== 合并文本并分块 ==========
-    full_text = ""
-    for i, text in enumerate(pages_text):
-        full_text += f"\n\n[第 {i + 1} 页]\n\n{text}"
-
-    full_text = full_text.strip()
-
-    # 使用 LangChain 进行文本分块
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        separators=["\n\n", "\n", "。", "；", "，", " ", ""],
-    )
-
-    chunks = splitter.split_text(full_text)
-
-    # 提取页码标记
-    page_markers = []
-    for i, chunk in enumerate(chunks):
-        match = re.search(r"\[第 (\d+) 页\]", chunk)
-        if match:
-            page_markers.append((i, int(match.group(1))))
-
-    # 构建分块对象
-    result = []
-    for i, chunk in enumerate(chunks):
-        # 从当前分块提取页码
-        page_hint = None
-        match = re.search(r"\[第 (\d+) 页\]", chunk)
-        if match:
-            page_hint = int(match.group(1))
-        else:
-            # 当前分块没有页码标记，向前查找最近的页码
-            for marker_idx, marker_page in reversed(page_markers):
-                if marker_idx < i:
-                    page_hint = marker_page
-                    break
-
-        result.append(
-            {
-                "chunk_id": i,
-                "text": chunk,
-                "page": page_hint,
-            }
-        )
-
+    result: list[dict] = []
+    for batch in parse_pdf_iter(pdf_path, chunk_size, chunk_overlap):
+        result.extend(batch)
     return result
 
 
@@ -307,15 +191,13 @@ def parse_pdf_iter(
     chunk_size: int = 500,
     chunk_overlap: int = 50,
     pages_per_batch: int = 20,
-) -> "Generator[list[dict], None, None]":
+) -> Generator[list[dict], None, None]:
     """Streaming variant of parse_pdf.
 
     Yields batches of chunks grouped by page ranges
     (``pages_per_batch`` pages at a time) so the caller can embed +
     write to DB incrementally, keeping peak memory bounded.
     """
-    from collections.abc import Generator
-
     start_time = datetime.now()
     doc = fitz.open(pdf_path)
     total_pages = doc.page_count
