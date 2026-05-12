@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ..utils.paths import VECTOR_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,29 @@ _load_error: Exception | None = None
 
 # Model file to use (quantized = best balance of quality vs size)
 _MODEL_FILE = "model_quantized.onnx"
+# Bundled model info (for PyInstaller package)
+_RERANKER_ZIP = "reranker-model.zip"
+_RERANKER_MODEL_DIR = "reranker-onnx"
+_CACHE_DIR = VECTOR_DIR / "cache"
+
+
+_BUNDLED_FILES = ["model_quantized.onnx", "tokenizer.json"]
 
 
 def _resolve_model_dir() -> Path | None:
-    """Locate the ONNX model directory from Modelscope cache or local path."""
+    """Locate the ONNX model directory from bundled zip, Modelscope, or HF cache."""
+    # 1. Try bundled model zip (PyInstaller)
+    from ..rag.bundled_models import extract_bundled_zip
+    snapshot_path = extract_bundled_zip(
+        zip_name=_RERANKER_ZIP,
+        cache_dir=_CACHE_DIR,
+        model_dir_name=_RERANKER_MODEL_DIR,
+        model_file=_MODEL_FILE,
+    )
+    if snapshot_path:
+        return snapshot_path
+
+    # 2. Modelscope cache
     candidate_paths = [
         Path.home() / ".cache" / "modelscope" / "onnx-community" / "bge-reranker-v2-m3-ONNX",
         Path.home() / ".cache" / "huggingface" / "hub"
