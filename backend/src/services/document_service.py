@@ -101,6 +101,7 @@ _MAX_CONCURRENT = 2  # hard cap on parallel processing tasks
 _doc_queue: asyncio.Queue[_QueueItem] = asyncio.Queue()
 _queue_worker_started = False
 _running: set[str] = set()       # doc_ids currently being processed
+_active_tasks: dict[str, asyncio.Task] = {}  # doc_id -> task ref for cancellation
 _concurrency_sem: asyncio.Semaphore | None = None
 
 
@@ -219,9 +220,11 @@ async def _queue_worker() -> None:
                 f"(并发: {len(_running)}/{_MAX_CONCURRENT}, "
                 f"队列剩余: {_doc_queue.qsize()})"
             )
-            asyncio.create_task(
+            task = asyncio.create_task(
                 _run_item(item), name=f"doc-proc-{item.doc_id[:8]}"
             )
+            _active_tasks[item.doc_id] = task
+            task.add_done_callback(lambda t, did=item.doc_id: _active_tasks.pop(did, None))
     except asyncio.CancelledError:
         _queue_worker_started = False
 
@@ -253,10 +256,16 @@ def start_processing(doc_id: str, stored_path: str, file_type: str = "pdf") -> N
 
 
 def cancel_processing(doc_id: str) -> bool:
-    """Cancel a queued or actively processing document."""
-    # Try to remove from queue
-    temp: list[_QueueItem] = []
+    """Cancel a queued or actively processing document.
+
+    - Removes from queue if not yet started.
+    - Cancels the asyncio Task (which will terminate the subprocess).
+    Returns True if anything was cancelled.
+    """
     found = False
+
+    # 1) Remove from queue
+    temp: list[_QueueItem] = []
     while not _doc_queue.empty():
         try:
             item = _doc_queue.get_nowait()
@@ -265,7 +274,6 @@ def cancel_processing(doc_id: str) -> bool:
         if item.doc_id == doc_id:
             found = True
             logger.info(f"[{doc_id[:8]}] 已从队列移除")
-            # Reset status
             metadata = _load_metadata()
             if doc_id in metadata:
                 metadata[doc_id].status = "pending"
@@ -274,6 +282,14 @@ def cancel_processing(doc_id: str) -> bool:
             temp.append(item)
     for item in temp:
         _doc_queue.put_nowait(item)
+
+    # 2) Cancel running task
+    task = _active_tasks.get(doc_id)
+    if task and not task.done():
+        task.cancel()
+        found = True
+        logger.info(f"[{doc_id[:8]}] 已取消处理任务")
+
     return found
 
 
@@ -370,12 +386,26 @@ async def delete(doc_id: str) -> dict:
     if doc_id not in metadata:
         raise HTTPException(status_code=404, detail=f"文档不存在: {doc_id}")
     doc = metadata[doc_id]
-    cancel_processing(doc_id)
+
+    cancelled = cancel_processing(doc_id)
+    if cancelled:
+        # Give subprocess a moment to release file handles
+        await asyncio.sleep(0.5)
 
     stored_path = Path(doc.stored_path)
     if stored_path.exists():
-        stored_path.unlink()
-        logger.info(f"[{doc_id[:8]}] 文件已删除")
+        for attempt in range(5):
+            try:
+                stored_path.unlink()
+                logger.info(f"[{doc_id[:8]}] 文件已删除")
+                break
+            except PermissionError:
+                if attempt < 4:
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.warning(
+                        f"[{doc_id[:8]}] 文件仍被占用，跳过删除: {stored_path}"
+                    )
 
     _delete_doc_chunks(doc_id)
     logger.info(f"[{doc_id[:8]}] 向量数据已删除")
