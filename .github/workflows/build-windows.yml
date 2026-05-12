@@ -92,15 +92,24 @@ jobs:
 
           os.environ['HF_ENDPOINT'] = 'https://hf-mirror.com'
 
-          # Download only the files we need (quantized ONNX + tokenizer)
-          files = ['model_quantized.onnx', 'tokenizer.json']
-          for f in files:
+          # Download model_quantized.onnx from onnx/ subdir, tokenizer from root
+          files = [
+              ('onnx/model_quantized.onnx', 'model_quantized.onnx'),
+              ('tokenizer.json', 'tokenizer.json'),
+          ]
+          for remote_path, local_name in files:
               path = hf_hub_download(
                   repo_id='onnx-community/bge-reranker-v2-m3-ONNX',
-                  filename=f'onnx/{f}',
+                  filename=remote_path,
                   local_dir=str(out),
               )
-              print(f'Downloaded {f}')
+              print(f'Downloaded {remote_path} -> {local_name}')
+
+          # Rename model_quantized.onnx from onnx/ to root
+          if Path(str(out) + '/onnx/model_quantized.onnx').exists():
+              import shutil
+              shutil.move(str(out) + '/onnx/model_quantized.onnx', str(out) + '/model_quantized.onnx')
+              Path(str(out) + '/onnx').rmdir()
 
           with zipfile.ZipFile('reranker-model.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
               for f in sorted(out.rglob('*')):
