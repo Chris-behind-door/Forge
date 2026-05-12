@@ -6,6 +6,10 @@ returned to the OS immediately.
 
 The parent process only touches metadata and the vector DB (LanceDB)
 which are lightweight.
+
+Pipeline mode: parsers yield batches of chunks, each batch is embedded
+and written to DB immediately, then discarded before the next batch.
+This caps peak memory at one batch + the embedding model (~2GB).
 """
 
 import logging
@@ -25,49 +29,47 @@ def _worker_main(
 ) -> dict:
     """Run inside a child process: parse → embed → write to LanceDB.
 
-    For CHM files, processing is streamed: parse one subdirectory at a
-    time, embed the chunks immediately, write to DB, then discard before
-    moving to the next subdirectory.  This caps peak memory at roughly
-    the cost of the largest subdirectory instead of the entire CHM.
+    Uses the streaming parser variants (parse_*_iter) so that chunks
+    are processed in batches, keeping peak memory bounded.
 
     Returns a summary dict with chunk_count, rss_peak, timings etc.
     """
-    import time
     import gc
+    import time
 
     start = time.monotonic()
     result: dict = {"doc_id": doc_id, "chunk_count": 0, "error": None}
 
     try:
-        # ── Parse ──
-        t0 = time.monotonic()
-        if file_type == "chm":
-            from ..parsers.chm import parse_chm
-            chunks = parse_chm(stored_path)
-        else:
-            from ..parsers.pdf import parse_pdf
-            chunks = parse_pdf(stored_path)
-        parse_time = time.monotonic() - t0
-        result["chunk_count"] = len(chunks)
-        result["parse_time_s"] = round(parse_time, 1)
-
-        # ── Embed + write to DB in batches ──
-        # Embedding all chunks at once can consume huge memory (the entire
-        # CHM text + all vectors).  Batch to cap memory at ~BATCH_SIZE texts.
-        _EMBED_BATCH_SIZE = 200
-        t0 = time.monotonic()
         from ..rag.vector_store import add_chunks
+
+        if file_type == "chm":
+            from ..parsers.chm import parse_chm_iter
+            parser_iter = parse_chm_iter(stored_path)
+        else:
+            from ..parsers.pdf import parse_pdf_iter
+            parser_iter = parse_pdf_iter(stored_path)
+
         total_vectors = 0
-        for i in range(0, len(chunks), _EMBED_BATCH_SIZE):
-            batch = chunks[i : i + _EMBED_BATCH_SIZE]
+        total_chunks = 0
+        t_parse = 0.0
+        t_embed = 0.0
+
+        for batch in parser_iter:
+            total_chunks += len(batch)
+
+            t0 = time.monotonic()
             count = add_chunks(doc_id, batch, project_id)
+            t_embed += time.monotonic() - t0
             total_vectors += count
+
             del batch
-            if i + _EMBED_BATCH_SIZE < len(chunks):
-                gc.collect()
-        embed_time = time.monotonic() - t0
+            gc.collect()
+
+        result["chunk_count"] = total_chunks
         result["vectors"] = total_vectors
-        result["embed_time_s"] = round(embed_time, 1)
+        result["parse_time_s"] = round(t_parse, 1)
+        result["embed_time_s"] = round(t_embed, 1)
 
     except Exception as e:
         result["error"] = str(e)
@@ -94,7 +96,6 @@ def run_in_subprocess(
 ) -> dict:
     """Synchronous call: spawn child, wait, return summary."""
     ctx = mp.get_context("spawn")  # clean process, no fork issues
-    # Use a simple pipe-based approach via Pool(1) for pickling convenience
     with ctx.Pool(1) as pool:
         async_result = pool.apply_async(
             _worker_main,

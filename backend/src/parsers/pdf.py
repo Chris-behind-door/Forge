@@ -300,3 +300,107 @@ def parse_pdf(
         )
 
     return result
+
+
+def parse_pdf_iter(
+    pdf_path: str,
+    chunk_size: int = 500,
+    chunk_overlap: int = 50,
+    pages_per_batch: int = 20,
+) -> "Generator[list[dict], None, None]":
+    """Streaming variant of parse_pdf.
+
+    Yields batches of chunks grouped by page ranges
+    (``pages_per_batch`` pages at a time) so the caller can embed +
+    write to DB incrementally, keeping peak memory bounded.
+    """
+    from collections.abc import Generator
+
+    start_time = datetime.now()
+    doc = fitz.open(pdf_path)
+    total_pages = doc.page_count
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        separators=["\n\n", "\n", "。", "；", "，", " ", ""],
+    )
+
+    chunk_id = 0
+
+    for page_start in range(0, total_pages, pages_per_batch):
+        page_end = min(page_start + pages_per_batch, total_pages)
+        pages_text: list[str] = [""] * (page_end - page_start)
+        pages_needing_ocr: list[tuple[int, object]] = []
+
+        for offset in range(page_end - page_start):
+            page_idx = page_start + offset
+            page = doc[page_idx]
+            direct_text = _extract_text_directly(page)
+            if len(direct_text.strip()) >= MIN_TEXT_CHARS_FOR_SKIP_OCR:
+                pages_text[offset] = direct_text
+            else:
+                pages_needing_ocr.append((offset, page))
+
+        # OCR for this batch
+        if pages_needing_ocr:
+            num_workers = min(MAX_OCR_WORKERS, len(pages_needing_ocr))
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                future_to_offset = {
+                    executor.submit(_process_page_with_ocr, page): offset
+                    for offset, page in pages_needing_ocr
+                }
+                for future in as_completed(future_to_offset):
+                    offset = future_to_offset[future]
+                    try:
+                        pages_text[offset] = future.result()
+                    except Exception as e:
+                        print(f"[PDF解析] 页面 {page_start + offset + 1} OCR 失败: {e}")
+
+        # Build text with page markers
+        full_text = ""
+        for offset, text in enumerate(pages_text):
+            full_text += f"\n\n[第 {page_start + offset + 1} 页]\n\n{text}"
+        full_text = full_text.strip()
+
+        del pages_text
+
+        if not full_text.strip():
+            continue
+
+        chunks = splitter.split_text(full_text)
+        del full_text
+
+        # Extract page markers for this batch
+        page_markers: list[tuple[int, int]] = []
+        for i, chunk in enumerate(chunks):
+            match = re.search(r"\[第 (\d+) 页\]", chunk)
+            if match:
+                page_markers.append((i, int(match.group(1))))
+
+        batch: list[dict] = []
+        for i, chunk in enumerate(chunks):
+            page_hint = None
+            match = re.search(r"\[第 (\d+) 页\]", chunk)
+            if match:
+                page_hint = int(match.group(1))
+            else:
+                for marker_idx, marker_page in reversed(page_markers):
+                    if marker_idx < i:
+                        page_hint = marker_page
+                        break
+            batch.append({
+                "chunk_id": chunk_id,
+                "text": chunk,
+                "page": page_hint,
+            })
+            chunk_id += 1
+
+        yield batch
+
+    elapsed = (datetime.now() - start_time).total_seconds()
+    print(
+        f"[PDF解析] 总页数: {total_pages}, "
+        f"分批处理完成, 耗时: {elapsed:.2f}s"
+    )
+    doc.close()

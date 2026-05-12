@@ -659,3 +659,162 @@ def parse_chm(
 
     finally:
         pass  # 解压目录保留，用于后续 CHM HTML 查看
+
+
+def parse_chm_iter(
+    chm_path: str,
+    chunk_size: int = 500,
+    chunk_overlap: int = 50,
+    yield_every: int = 50,
+) -> "Generator[list[dict], None, None]":
+    """Streaming variant of parse_chm.
+
+    Yields batches of chunks (up to ``yield_every`` chunks each) so the
+    caller can embed + write to DB before receiving the next batch.
+    Peak memory stays proportional to the largest subdirectory instead
+    of the entire CHM.
+    """
+    from collections.abc import Generator
+
+    chm_p = Path(chm_path)
+    extract_dir = chm_p.parent / f"{chm_p.stem}_extracted"
+    if extract_dir.exists():
+        shutil.rmtree(extract_dir)
+
+    try:
+        if not _extract_chm(chm_path, str(extract_dir)):
+            raise RuntimeError(f"无法解压 CHM 文件: {chm_path}")
+
+        subdirs: list[Path] = []
+        root_htmls: list[Path] = []
+        for child in sorted(extract_dir.iterdir()):
+            if child.is_dir() and not _is_system_dir(child.name):
+                subdirs.append(child)
+            elif child.is_file() and child.suffix.lower() in (".htm", ".html"):
+                root_htmls.append(child)
+
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            separators=["\n\n", "\n", "。", "；", "，", " ", ""],
+        )
+
+        chunk_id = 0
+        batch: list[dict] = []
+        total_sections = 0
+
+        def _maybe_yield() -> None:
+            nonlocal batch
+            if len(batch) >= yield_every:
+                # Don't yield inside nested function; caller checks after append
+                pass
+
+        def _flush_batch(batch: list[dict], out: list[list[dict]]) -> list[dict]:
+            """If batch is large enough, move it to out and return a fresh list."""
+            if len(batch) >= yield_every:
+                out.append(batch)
+                return []
+            return batch
+
+        yield_batches: list[list[dict]] = []
+
+        for subdir in subdirs:
+            parent_title = subdir.name
+            html_files = _find_html_files(str(subdir))
+            if not html_files:
+                continue
+
+            dir_sections: list[tuple[str | None, str | None, str, str]] = []
+            for html_file in html_files:
+                try:
+                    location, text, chapter_title = _process_html_file(
+                        html_file, extract_dir
+                    )
+                    if text.strip():
+                        dir_sections.append((chapter_title, location, text, parent_title))
+                except Exception as e:
+                    logger.warning("Failed to parse HTML %s: %s", html_file, e)
+                    continue
+
+            for chapter_title, location, text, _parent in dir_sections:
+                header_parts: list[str] = [f"[文档: {parent_title}]"]
+                if chapter_title:
+                    header_parts.append(f"[章节: {chapter_title}]")
+                if location:
+                    header_parts.append(f"[位置: {location}]")
+                header = "\n".join(header_parts)
+
+                chunks = splitter.split_text(text)
+                for ci, chunk_text in enumerate(chunks):
+                    if ci == 0:
+                        full_text = f"{header}\n{chunk_text}" if header else chunk_text
+                    else:
+                        loc_tag = f"[位置: {location}]" if location else ""
+                        full_text = f"{loc_tag}\n{chunk_text}" if loc_tag else chunk_text
+
+                    batch.append({
+                        "chunk_id": chunk_id,
+                        "text": full_text,
+                        "page": None,
+                        "location": location,
+                        "parent_title": parent_title,
+                        "chapter": chapter_title,
+                    })
+                    chunk_id += 1
+
+                if len(batch) >= yield_every:
+                    yield_batches.append(batch)
+                    batch = []
+
+            total_sections += len(dir_sections)
+            del dir_sections
+
+        # Root-level HTML
+        for html_file in root_htmls:
+            try:
+                location, text, chapter_title = _process_html_file(
+                    html_file, extract_dir
+                )
+                if text.strip():
+                    header_parts: list[str] = []
+                    if chapter_title:
+                        header_parts.append(f"[章节: {chapter_title}]")
+                    if location:
+                        header_parts.append(f"[位置: {location}]")
+                    header = "\n".join(header_parts)
+
+                    chunks = splitter.split_text(text)
+                    for ci, chunk_text in enumerate(chunks):
+                        if ci == 0:
+                            full_text = f"{header}\n{chunk_text}" if header else chunk_text
+                        else:
+                            loc_tag = f"[位置: {location}]" if location else ""
+                            full_text = f"{loc_tag}\n{chunk_text}" if loc_tag else chunk_text
+                        batch.append({
+                            "chunk_id": chunk_id,
+                            "text": full_text,
+                            "page": None,
+                            "location": location,
+                            "parent_title": None,
+                            "chapter": chapter_title,
+                        })
+                        chunk_id += 1
+
+                    if len(batch) >= yield_every:
+                        yield_batches.append(batch)
+                        batch = []
+
+            except Exception as e:
+                logger.warning("Failed to parse HTML %s: %s", html_file, e)
+                continue
+
+        total_sections += len(root_htmls)
+
+        # Yield accumulated batches
+        for b in yield_batches:
+            yield b
+        if batch:
+            yield batch
+
+    finally:
+        pass
