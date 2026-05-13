@@ -90,6 +90,37 @@ cargo tauri dev
 
 ## Building
 
+### Windows Installer (cross-compile from Linux)
+
+Build a complete Windows `.exe` installer on Fedora without a Windows VM:
+
+```bash
+# Prerequisites (one-time)
+sudo dnf install mingw64-nsis mingw32-nsis lld llvm clang
+rustup target add x86_64-pc-windows-msvc
+cargo install --locked cargo-xwin
+
+# Build frontend
+cd frontend && npm run build && cd ..
+
+# Build Windows installer (with proxy for GitHub access)
+export https_proxy=http://127.0.0.1:7897
+npm run tauri build -- --runner cargo-xwin --target x86_64-pc-windows-msvc
+
+# Output: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/
+#          Engineering Assistant_<version>_x64-setup.exe
+```
+
+The installer bundles an **embedded Python 3.12** with all dependencies, embedding model,
+ONNX reranker model, and 7-Zip tools — no PyInstaller or Windows VM required.
+
+### Local Windows Build
+
+Use `build-local.ps1` (requires Windows with Node.js, Rust+MSVC, Python, 7-Zip):
+```powershell
+.\build-local.ps1 -ModelDir Z:\models
+```
+
 ### Backend (PyInstaller)
 
 ```bash
@@ -104,13 +135,9 @@ cd frontend
 npm run build
 ```
 
-### Tauri Application
+### Tauri Application (Linux)
 
 ```bash
-# Copy backend executable to sidecar directory
-cp backend/dist/backend src-tauri/binaries/backend-x86_64-unknown-linux-gnu
-
-# Build Tauri application
 cd src-tauri
 cargo tauri build
 ```
