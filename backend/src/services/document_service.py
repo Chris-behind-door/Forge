@@ -65,15 +65,24 @@ def _load_metadata() -> dict[str, Document]:
     if not METADATA_FILE.exists():
         return {}
     with open(METADATA_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            logger.warning(
+                "Metadata file corrupted or empty, resetting: %s", METADATA_FILE
+            )
+            return {}
     return {k: Document(**v) for k, v in data.items()}
 
 
 def _save_metadata(documents: dict[str, Document]) -> None:
     ensure_dirs()
-    with open(METADATA_FILE, "w", encoding="utf-8") as f:
+    # Atomic write: avoid truncating the file while another thread reads it
+    tmp = METADATA_FILE.with_suffix(METADATA_FILE.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump({k: v.model_dump() for k, v in documents.items()},
                   f, indent=2, ensure_ascii=False)
+    tmp.replace(METADATA_FILE)
 
 
 def _calculate_file_hash(file_path: Path, chunk_size: int = 8192) -> str:
@@ -144,6 +153,9 @@ async def process_document(doc_id: str, stored_path: str, file_type: str = "pdf"
         )
 
         if result.get("error"):
+            tb = result.get("error_tb", "")
+            if tb:
+                logger.error(f"[{doc_id[:8]}] 子进程错误:\n{tb}")
             raise RuntimeError(result["error"])
 
         # Rebuild FTS index in parent process (subprocess may have created
@@ -212,9 +224,11 @@ async def _queue_worker() -> None:
     try:
         while True:
             item = await _doc_queue.get()
+            # Track item immediately so cancel_processing can find it
+            # before it has acquired the semaphore
+            _running.add(item.doc_id)
             sem = _get_sem()
             await sem.acquire()
-            _running.add(item.doc_id)
             logger.info(
                 f"[{item.doc_id[:8]}] 开始处理 "
                 f"(并发: {len(_running)}/{_MAX_CONCURRENT}, "
@@ -283,7 +297,15 @@ def cancel_processing(doc_id: str) -> bool:
     for item in temp:
         _doc_queue.put_nowait(item)
 
-    # 2) Cancel running task
+    # 2.5) Cancel item being dispatched (in _running but not in _active_tasks yet)
+    if doc_id in _running and doc_id not in _active_tasks:
+        _running.discard(doc_id)
+        sem = _get_sem()
+        sem.release()  # release the semaphore that was acquired for this ghost item
+        found = True
+        logger.info(f"[{doc_id[:8]}] 已取消分发中的任务")
+
+    # 3) Cancel running task
     task = _active_tasks.get(doc_id)
     if task and not task.done():
         task.cancel()

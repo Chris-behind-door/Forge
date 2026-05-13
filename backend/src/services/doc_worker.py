@@ -35,6 +35,12 @@ def _worker_main(
     import gc
     import time
 
+    # Configure logging so subprocess diagnostics are visible
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [subproc] %(levelname)s %(message)s",
+    )
+
     start = time.monotonic()
     result: dict = {"doc_id": doc_id, "chunk_count": 0, "error": None}
 
@@ -70,7 +76,9 @@ def _worker_main(
         result["embed_time_s"] = round(t_embed, 1)
 
     except Exception as e:
+        import traceback
         result["error"] = str(e)
+        result["error_tb"] = traceback.format_exc()
 
     result["total_time_s"] = round(time.monotonic() - start, 1)
 

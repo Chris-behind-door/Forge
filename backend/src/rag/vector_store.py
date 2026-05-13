@@ -68,14 +68,16 @@ def get_db():
 
 
 def _get_or_create_table(db):
-    """获取或创建表，必要时迁移 schema"""
+    """获取或创建表，必要时迁移 schema。
+
+    多进程安全：create_table 在子进程并发时可能报 already exists，
+    此时退化为 open_table。
+    """
     ChunkRecord = _get_chunk_record()
     if CHUNKS_TABLE in db.table_names():
         table = db.open_table(CHUNKS_TABLE)
         schema = table.schema
         pid_field = next((f for f in schema if f.name == "project_id"), None)
-        # LanceDB v0.19+ returns "string", older versions return "utf8".
-        # Only rebuild if the column doesn't exist or is a non-string type.
         pid_type_str = str(pid_field.type) if pid_field else ""
         needs_rebuild = pid_field is None or (
             "string" not in pid_type_str and "utf8" not in pid_type_str
@@ -85,7 +87,13 @@ def _get_or_create_table(db):
             db.drop_table(CHUNKS_TABLE)
             return db.create_table(CHUNKS_TABLE, schema=ChunkRecord)
         return table
-    return db.create_table(CHUNKS_TABLE, schema=ChunkRecord)
+    try:
+        return db.create_table(CHUNKS_TABLE, schema=ChunkRecord)
+    except Exception as e:
+        if "already exists" in str(e) and CHUNKS_TABLE in db.table_names():
+            logger.info("Table already exists (concurrent create), opening")
+            return db.open_table(CHUNKS_TABLE)
+        raise
 
 
 def _ensure_fts_index(table) -> None:

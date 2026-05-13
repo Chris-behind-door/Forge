@@ -36,16 +36,20 @@ _BUNDLED_FILES = ["model_quantized.onnx", "tokenizer.json"]
 
 def _resolve_model_dir() -> Path | None:
     """Locate the ONNX model directory from bundled zip, Modelscope, or HF cache."""
-    # 1. Try bundled model zip (PyInstaller)
+    # 1. Try bundled model zip (with retry for cold-start extraction)
     from ..rag.bundled_models import extract_bundled_zip
-    snapshot_path = extract_bundled_zip(
-        zip_name=_RERANKER_ZIP,
-        cache_dir=_CACHE_DIR,
-        model_dir_name=_RERANKER_MODEL_DIR,
-        model_file=_MODEL_FILE,
-    )
-    if snapshot_path:
-        return snapshot_path
+    import time as _time
+    for attempt in range(3):
+        snapshot_path = extract_bundled_zip(
+            zip_name=_RERANKER_ZIP,
+            cache_dir=_CACHE_DIR,
+            model_dir_name=_RERANKER_MODEL_DIR,
+            model_file=_MODEL_FILE,
+        )
+        if snapshot_path:
+            return snapshot_path
+        if attempt < 2:
+            _time.sleep(1)  # wait for concurrent extraction
 
     # 2. Modelscope cache
     candidate_paths = [

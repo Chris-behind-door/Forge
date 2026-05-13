@@ -80,6 +80,16 @@ function findMatchingCitation(
       c.doc_name === docName && c.location && c.location.includes(location)
     )
     if (exactBoth) return exactBoth
+
+    // 策略1.5：location 包含页码（如"第14页"），按 page 精确匹配
+    const pageMatch = location.match(/第\s*(\d+)\s*页/)
+    if (pageMatch) {
+      const targetPage = parseInt(pageMatch[1], 10)
+      const pageExact = citations.find(c =>
+        c.doc_name === docName && c.page === targetPage
+      )
+      if (pageExact) return pageExact
+    }
   }
 
   // 策略2：doc_name 精确匹配

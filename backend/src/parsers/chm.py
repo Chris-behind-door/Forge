@@ -140,8 +140,8 @@ def _extract_chm_7z(chm_path: str, output_dir: str) -> bool:
         # Running as PyInstaller bundle (onedir mode)
         bundled = Path(sys.executable).parent / 'bundled_tools' / '7z.exe'
     else:
-        # Running as plain Python
-        bundled = Path(__file__).resolve().parent.parent.parent / 'bundled_tools' / '7z.exe'
+        # Running as plain Python: chm.py -> parsers/ -> src/ -> backend/ -> backend-bundle/
+        bundled = Path(__file__).resolve().parent.parent.parent.parent / 'bundled_tools' / '7z.exe'
     if bundled.exists():
         candidates.insert(0, ("bundled 7z", [str(bundled), "x", "-y", f"-o{safe_output}", safe_chm]))
 

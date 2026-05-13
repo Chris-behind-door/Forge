@@ -68,3 +68,5 @@ packaging/RPMS/
 packaging/SRPMS/
 src-tauri/target/release/bundle/
 rpm-build/
+src-tauri/backend-bundle/
+package-lock.json

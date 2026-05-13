@@ -108,7 +108,7 @@ function ChatView({ sessionId, onNewChat, projects: externalProjects }: ChatView
       } else if (detail.file_type === 'pdf') {
         let url = `${getApiBase()}/documents/${c.doc_id}/file`
         const page = detail.page ?? c.page
-        if (page) url += `#page=${page}`
+        if (page != null) url += `#page=${page}`
         open(url)
       } else {
         message.info('该引用暂无精确定位，请查阅原文')

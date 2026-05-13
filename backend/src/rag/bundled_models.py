@@ -52,10 +52,14 @@ def extract_bundled_zip(
                 size = p.stat().st_size if p.is_file() else "DIR"
                 logger.info("[DEBUG]   %s (%s)", p.relative_to(target_dir), size)
 
-    # Clean up any incomplete extraction
+    # Clean up any incomplete extraction.
+    # Be conservative: don't delete if another process might be extracting.
     if target_dir.exists():
-        logger.info("清理不完整目录: %s", target_dir)
-        shutil.rmtree(target_dir, ignore_errors=True)
+        if _find_model_file(target_dir, model_file):
+            logger.info("模型已由另一个进程解压完成: %s", target_dir)
+            return _find_model_file(target_dir, model_file)
+        # Only clean up if the zip exists AND the target dir is truly empty/stale
+        # (skip cleanup to avoid deleting a concurrent extraction)
 
     # Find zip file
     candidates: list[Path] = []
@@ -69,8 +73,11 @@ def extract_bundled_zip(
         candidates.append(exe_dir.parent / "data" / zip_name)
     else:
         candidates.append(Path(__file__).parent.parent.parent / zip_name)
+        # Embedded Python mode: backend-bundle/backend/src/rag/ -> backend-bundle/
+        candidates.append(Path(__file__).parent.parent.parent.parent / zip_name)
 
-    logger.info("[DEBUG] Looking for zip '%s', candidates:", zip_name)
+    logger.info("[DEBUG] Looking for zip '%s', __file__=%s", zip_name, Path(__file__).resolve())
+    logger.info("[DEBUG] candidates:")
     for c in candidates:
         logger.info("[DEBUG]   %s -> exists=%s", c, c.exists())
 
@@ -78,43 +85,47 @@ def extract_bundled_zip(
         if not zip_path.exists():
             continue
 
-        logger.info("发现离线模型包: %s，正在解压...", zip_path)
-        logger.info("[DEBUG] zip size = %s bytes", zip_path.stat().st_size)
-        try:
-            target_dir.mkdir(parents=True, exist_ok=True)
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                # Detect if zip has a single top-level wrapper dir
-                top_dirs: set[str] = set()
-                for info in zf.infolist():
-                    parts = Path(info.filename).parts
-                    if parts:
-                        top_dirs.add(parts[0])
+        for attempt in range(2):  # up to 2 attempts (initial + 1 retry)
+            logger.info("发现离线模型包: %s，正在解压...%s", zip_path,
+                        f" (重试 {attempt})" if attempt > 0 else "")
+            logger.info("[DEBUG] zip size = %s bytes", zip_path.stat().st_size)
+            try:
+                target_dir.mkdir(parents=True, exist_ok=True)
+                with zipfile.ZipFile(zip_path, "r") as zf:
+                    top_dirs: set[str] = set()
+                    for info in zf.infolist():
+                        parts = Path(info.filename).parts
+                        if parts:
+                            top_dirs.add(parts[0])
 
-                should_strip = False
-                if len(top_dirs) == 1:
-                    top_name = next(iter(top_dirs))
-                    should_strip = True
-                    logger.info("zip顶层: %s, 将strip", top_name)
+                    should_strip = len(top_dirs) == 1
+                    if should_strip:
+                        logger.info("zip顶层: %s, 将strip", next(iter(top_dirs)))
+                    else:
+                        logger.info("zip有多个顶层目录，不strip")
+
+                    for info in zf.infolist():
+                        parts = Path(info.filename).parts
+                        if not parts:
+                            continue
+                        rel = str(Path(*parts[1:])) if should_strip and len(parts) > 1 else info.filename
+                        if not rel:
+                            continue
+                        dest = target_dir / rel
+                        if info.is_dir():
+                            dest.mkdir(parents=True, exist_ok=True)
+                        else:
+                            dest.parent.mkdir(parents=True, exist_ok=True)
+                            with zf.open(info) as src, open(dest, "wb") as dst:
+                                shutil.copyfileobj(src, dst)
+                break  # success, exit retry loop
+            except OSError as e:
+                if attempt == 0:
+                    logger.warning("解压冲突 (%s)，1秒后重试...", e)
+                    import time
+                    time.sleep(1)
                 else:
-                    logger.info("zip有多个顶层目录，不strip")
-
-                for info in zf.infolist():
-                    parts = Path(info.filename).parts
-                    if not parts:
-                        continue
-                    if should_strip and len(parts) > 1:
-                        rel = str(Path(*parts[1:]))
-                    else:
-                        rel = info.filename
-                    if not rel:
-                        continue
-                    dest = target_dir / rel
-                    if info.is_dir():
-                        dest.mkdir(parents=True, exist_ok=True)
-                    else:
-                        dest.parent.mkdir(parents=True, exist_ok=True)
-                        with zf.open(info) as src, open(dest, "wb") as dst:
-                            shutil.copyfileobj(src, dst)
+                    raise
 
             logger.info("离线模型包解压完成")
             logger.info("[DEBUG] Post-extract target_dir contents:")
@@ -135,15 +146,12 @@ def extract_bundled_zip(
 
             logger.warning("解压完成但未找到 %s", model_file)
 
-        except Exception as e:
-            logger.warning("离线模型包解压失败: %s", e)
-
     logger.info("未找到离线模型包: %s", zip_name)
     return None
 
 
 def _find_model_file(directory: Path, model_file: str) -> Path | None:
-    """Find model_file in directory (may be nested in snapshots/)."""
+    """Find model_file in directory (may be nested in snapshots/ or a wrapper dir)."""
     if not directory.exists():
         return None
     # Direct file
@@ -155,4 +163,12 @@ def _find_model_file(directory: Path, model_file: str) -> Path | None:
         for snap in snapshots.iterdir():
             if snap.is_dir() and (snap / model_file).is_file():
                 return snap / model_file
+    # Double-nested (old extraction without strip): wrapper/snapshots/<hash>/model_file
+    for subdir in directory.iterdir():
+        if subdir.is_dir():
+            inner_snapshots = subdir / "snapshots"
+            if inner_snapshots.exists():
+                for snap in inner_snapshots.iterdir():
+                    if snap.is_dir() and (snap / model_file).is_file():
+                        return snap / model_file
     return None

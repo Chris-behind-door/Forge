@@ -107,6 +107,9 @@ fn main() {
                 // Also try without .exe (in case non-Windows path is kept)
                 let resource_backend_noexe = resource_dir.join("backend-bundle").join("backend");
 
+                // Embedded Python launcher
+                let resource_python = resource_dir.join("backend-bundle").join("python").join("python.exe");
+
                 // exe sibling (portable)
                 let exe_sibling = exe_dir.join("backend");
 
@@ -118,21 +121,39 @@ fn main() {
                     }
                 }
 
-                let backend_cmd = if resource_backend.exists() {
+                let (backend_cmd, backend_args_opt) = if resource_backend.exists() {
                     println!("[Forge] Found backend in resources: {:?}", resource_backend);
-                    resource_backend.to_string_lossy().to_string()
+                    (resource_backend.to_string_lossy().to_string(), None::<Vec<String>>)
+                } else if resource_python.exists() {
+                    println!("[Forge] Found embedded Python: {:?}", resource_python);
+                    let port_str = backend_port.to_string();
+                    let args: Vec<String> = vec![
+                        "-m".to_string(),
+                        "uvicorn".to_string(),
+                        "src.main:app".to_string(),
+                        "--host".to_string(),
+                        "127.0.0.1".to_string(),
+                        "--port".to_string(),
+                        port_str,
+                    ];
+                    (resource_python.to_string_lossy().to_string(), Some(args))
                 } else if resource_backend_noexe.exists() {
                     println!("[Forge] Found backend in resources (no .exe): {:?}", resource_backend_noexe);
-                    resource_backend_noexe.to_string_lossy().to_string()
+                    (resource_backend_noexe.to_string_lossy().to_string(), None::<Vec<String>>)
                 } else if exe_sibling.exists() {
                     println!("[Forge] Found backend next to exe: {:?}", exe_sibling);
-                    exe_sibling.to_string_lossy().to_string()
+                    (exe_sibling.to_string_lossy().to_string(), None::<Vec<String>>)
                 } else {
                     println!("[Forge] Using backend from PATH");
-                    "backend".to_string()
+                    ("backend".to_string(), None::<Vec<String>>)
                 };
 
-                match Command::new(&backend_cmd)
+                let mut cmd = Command::new(&backend_cmd);
+                if let Some(args) = backend_args_opt {
+                    cmd.args(&args);
+                    cmd.current_dir(resource_dir.join("backend-bundle").join("backend"));
+                }
+                match cmd
                     .env("IPC_TOKEN", ipc_token.clone())
                     .env("FORGE_PORT", backend_port.to_string())
                     .stdout(std::process::Stdio::piped())
