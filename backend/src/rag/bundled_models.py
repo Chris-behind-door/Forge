@@ -72,9 +72,11 @@ def extract_bundled_zip(
         candidates.append(exe_dir.parent / zip_name)
         candidates.append(exe_dir.parent / "data" / zip_name)
     else:
-        candidates.append(Path(__file__).parent.parent.parent / zip_name)
-        # Embedded Python mode: backend-bundle/backend/src/rag/ -> backend-bundle/
-        candidates.append(Path(__file__).parent.parent.parent.parent / zip_name)
+        proj_root = Path(__file__).parent.parent.parent.parent
+        candidates.append(Path(__file__).parent.parent.parent / zip_name)  # backend/
+        candidates.append(proj_root / zip_name)  # project root
+        # src-tauri/backend-bundle (dev mode with bundled models)
+        candidates.append(proj_root / "src-tauri" / "backend-bundle" / zip_name)
 
     logger.info("[DEBUG] Looking for zip '%s', __file__=%s", zip_name, Path(__file__).resolve())
     logger.info("[DEBUG] candidates:")
@@ -127,24 +129,24 @@ def extract_bundled_zip(
                 else:
                     raise
 
-            logger.info("离线模型包解压完成")
-            logger.info("[DEBUG] Post-extract target_dir contents:")
-            for p in sorted(target_dir.rglob("*"))[:30]:
-                size = p.stat().st_size if p.is_file() else "DIR"
-                logger.info("[DEBUG]   %s (%s)", p.relative_to(target_dir), size)
+        logger.info("离线模型包解压完成")
+        logger.info("[DEBUG] Post-extract target_dir contents:")
+        for p in sorted(target_dir.rglob("*"))[:30]:
+            size = p.stat().st_size if p.is_file() else "DIR"
+            logger.info("[DEBUG]   %s (%s)", p.relative_to(target_dir), size)
 
-            found = _find_model_file(target_dir, model_file)
-            logger.info("[DEBUG] _find_model_file post-extract: %s", found)
-            if found:
-                logger.info("模型目录: %s", found.parent)
-                logger.info(
-                    "%s: 存在=%s, 大小=%s",
-                    model_file, found.exists(),
-                    found.stat().st_size if found.exists() else "N/A",
-                )
-                return found.parent
+        found = _find_model_file(target_dir, model_file)
+        logger.info("[DEBUG] _find_model_file post-extract: %s", found)
+        if found:
+            logger.info("模型目录: %s", found.parent)
+            logger.info(
+                "%s: 存在=%s, 大小=%s",
+                model_file, found.exists(),
+                found.stat().st_size if found.exists() else "N/A",
+            )
+            return found.parent
 
-            logger.warning("解压完成但未找到 %s", model_file)
+        logger.warning("解压完成但未找到 %s", model_file)
 
     logger.info("未找到离线模型包: %s", zip_name)
     return None
