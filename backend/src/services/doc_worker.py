@@ -19,6 +19,28 @@ import os
 logger = logging.getLogger(__name__)
 
 
+def _get_existing_chunk_ids(doc_id: str) -> set[str]:
+    """Query LanceDB for chunk_ids already stored for this doc."""
+    try:
+        from ..rag.vector_store import get_db, CHUNKS_TABLE, _get_chunk_record
+        ChunkRecord = _get_chunk_record()
+        db = get_db()
+        if CHUNKS_TABLE not in db.table_names():
+            return set()
+        table = db.open_table(CHUNKS_TABLE)
+        safe_doc_id = doc_id.replace("'", "''")
+        rows = (
+            table.search()
+            .where(f"doc_id = '{safe_doc_id}'")
+            .select(["chunk_id"])
+            .limit(100000)
+            .to_list()
+        )
+        return {r["chunk_id"] for r in rows}
+    except Exception:
+        return set()
+
+
 def _worker_main(
     stored_path: str,
     file_type: str,
@@ -30,12 +52,14 @@ def _worker_main(
     Uses the streaming parser variants (parse_*_iter) so that chunks
     are processed in batches, keeping peak memory bounded.
 
+    Supports resume: if the doc was previously partially processed
+    (e.g. timed out), existing chunks are skipped.
+
     Returns a summary dict with chunk_count, rss_peak, timings etc.
     """
     import gc
     import time
 
-    # Configure logging so subprocess diagnostics are visible
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [subproc] %(levelname)s %(message)s",
@@ -47,6 +71,13 @@ def _worker_main(
     try:
         from ..rag.vector_store import add_chunks
 
+        existing_ids = _get_existing_chunk_ids(doc_id)
+        if existing_ids:
+            logger.info(
+                "[subproc] Resuming %s: %d chunks already in DB, will skip",
+                doc_id[:8], len(existing_ids),
+            )
+
         if file_type == "chm":
             from ..parsers.chm import parse_chm_iter
             parser_iter = parse_chm_iter(stored_path)
@@ -56,10 +87,20 @@ def _worker_main(
 
         total_vectors = 0
         total_chunks = 0
-        t_parse = 0.0
+        total_skipped = 0
         t_embed = 0.0
 
         for batch in parser_iter:
+            if existing_ids:
+                filtered = [
+                    c for c in batch
+                    if f"{doc_id}_{c['chunk_id']}" not in existing_ids
+                ]
+                total_skipped += len(batch) - len(filtered)
+                if not filtered:
+                    continue
+                batch = filtered
+
             total_chunks += len(batch)
 
             t0 = time.monotonic()
@@ -72,7 +113,7 @@ def _worker_main(
 
         result["chunk_count"] = total_chunks
         result["vectors"] = total_vectors
-        result["parse_time_s"] = round(t_parse, 1)
+        result["skipped"] = total_skipped
         result["embed_time_s"] = round(t_embed, 1)
 
     except Exception as e:
@@ -82,7 +123,6 @@ def _worker_main(
 
     result["total_time_s"] = round(time.monotonic() - start, 1)
 
-    # Report peak RSS from this child
     try:
         import psutil
         result["child_rss_peak_mb"] = round(
@@ -107,4 +147,4 @@ def run_in_subprocess(
             _worker_main,
             (stored_path, file_type, doc_id, project_id),
         )
-        return async_result.get(timeout=3600)  # 1h max per file
+        return async_result.get(timeout=10800)  # 3h max per file

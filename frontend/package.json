@@ -16,10 +16,13 @@
     "@tauri-apps/plugin-shell": "^2.3.5",
     "antd": "^6.3.3",
     "dayjs": "^1.11.20",
+    "katex": "^0.16.46",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

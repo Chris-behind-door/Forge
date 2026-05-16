@@ -327,11 +327,11 @@ def queue_status() -> dict:
 async def resume_pending_documents() -> None:
     metadata = _load_metadata()
     for doc_id, doc in metadata.items():
-        if doc.status in ("pending", "processing", "queued"):
+        if doc.status in ("pending", "processing", "queued", "error"):
             stored_path = Path(doc.stored_path)
             if stored_path.exists():
                 logger.info(f"[{doc_id[:8]}] 恢复处理: {doc.name} (状态: {doc.status})")
-                if doc.status in ("processing", "queued"):
+                if doc.status in ("processing", "queued", "error"):
                     metadata[doc_id].status = "pending"
                     _save_metadata(metadata)
                 start_processing(doc_id, str(stored_path), doc.file_type)
@@ -519,7 +519,8 @@ def get_chunk_detail(doc_id: str, chunk_index: int) -> ChunkDetail:
     if doc_id not in metadata:
         raise HTTPException(status_code=404, detail=f"文档不存在: {doc_id}")
     doc = metadata[doc_id]
-    if doc.status != "ready":
+    # Allow access to chunks even for error-status docs (partial results from timed-out processing)
+    if doc.status not in ("ready", "error"):
         raise HTTPException(status_code=400, detail=f"文档尚未处理完成: {doc.status}")
 
     db = get_db()

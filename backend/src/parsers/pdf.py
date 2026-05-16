@@ -56,6 +56,96 @@ def _cleanup_ocr_engines() -> None:
 atexit.register(_cleanup_ocr_engines)
 
 
+def _detect_gpu_provider():
+    """Detect best available GPU provider for ONNX Runtime.
+
+    Returns (provider_name, rapidocr_kwargs) where rapidocr_kwargs are
+    constructor kwargs RapidOCR understands (use_dml / use_cuda).
+    For providers RapidOCR doesn't natively support (ROCm / MIGraphX),
+    returns (provider_name, {}) and the caller must patch sessions manually.
+    """
+    import sys as _sys
+    try:
+        from onnxruntime import get_available_providers
+    except ImportError:
+        return "CPU", {}
+
+    providers = get_available_providers()
+    logger.info("OCR: available ONNX providers: %s", providers)
+
+    if _sys.platform == "win32" and "DmlExecutionProvider" in providers:
+        logger.info("OCR: using DirectML (GPU)")
+        return "DML", {"use_dml": True}
+
+    if "CUDAExecutionProvider" in providers:
+        logger.info("OCR: using CUDA/HIP (GPU)")
+        return "CUDA", {"use_cuda": True}
+
+    if "ROCMExecutionProvider" in providers:
+        logger.info("OCR: ROCm GPU detected, will patch ONNX sessions")
+        return "ROCM", {}
+
+    if "MIGraphXExecutionProvider" in providers:
+        logger.info("OCR: MIGraphX GPU detected, will patch ONNX sessions")
+        return "MIGraphX", {}
+
+    logger.info("OCR: using CPU (no GPU provider found)")
+    return "CPU", {}
+
+
+def _patch_rapidocr_sessions(ocr_engine, provider: str) -> None:
+    """Replace ONNX sessions inside a RapidOCR engine with GPU-accelerated ones.
+
+    RapidOCR only natively supports use_cuda / use_dml. For ROCm / MIGraphX,
+    we recreate the InferenceSession objects with the GPU provider.
+    """
+    from pathlib import Path
+    from onnxruntime import InferenceSession, SessionOptions
+    from onnxruntime import GraphOptimizationLevel
+
+    sess_opts = SessionOptions()
+    sess_opts.log_severity_level = 4
+    sess_opts.graph_optimization_level = GraphOptimizationLevel.ORT_ENABLE_ALL
+
+    provider_opts = [(provider, {})]
+
+    def _replace(session_holder):
+        """session_holder is an OrtInferSession with .session and model_path in config."""
+        try:
+            old_session = getattr(session_holder, 'session', None)
+            if old_session is None:
+                return
+            model_path = old_session._model_path if hasattr(old_session, '_model_path') else None
+            if model_path is None:
+                # Fallback: read model_path from the internal config
+                return
+            new_session = InferenceSession(
+                model_path, sess_options=sess_opts, providers=provider_opts,
+            )
+            actual = new_session.get_providers()[0]
+            if actual == provider:
+                session_holder.session = new_session
+                logger.info("OCR: patched session -> %s", actual)
+            else:
+                logger.warning("OCR: GPU patch failed, got %s instead of %s", actual, provider)
+                new_session.close()
+        except Exception as e:
+            logger.warning("OCR: failed to patch session for %s: %s", provider, e)
+
+    # Det model
+    det = getattr(ocr_engine, 'text_det', None)
+    if det:
+        _replace(getattr(det, 'infer', None))
+    # Rec model
+    rec = getattr(ocr_engine, 'text_rec', None)
+    if rec:
+        _replace(getattr(rec, 'session', None))
+    # Cls model (optional)
+    cls = getattr(ocr_engine, 'text_cls', None)
+    if cls:
+        _replace(getattr(cls, 'session', None))
+
+
 def _get_ocr_engine():
     """获取当前线程的 OCR 引擎（线程安全，首次调用时才 import rapidocr）"""
     try:
@@ -68,12 +158,15 @@ def _get_ocr_engine():
     thread_id = threading.get_ident()
     with _ocr_lock:
         if thread_id not in _ocr_engines:
-            # Limit cache: keep at most MAX_OCR_WORKERS engines
             while len(_ocr_engines) >= MAX_OCR_WORKERS:
                 oldest_tid = next(iter(_ocr_engines))
                 del _ocr_engines[oldest_tid]
             logger.info("Initializing OCR engine for thread %s", thread_id)
-            _ocr_engines[thread_id] = RapidOCR()
+            provider, accel_kwargs = _detect_gpu_provider()
+            engine = RapidOCR(**accel_kwargs)
+            if provider in ("ROCM", "MIGraphX"):
+                _patch_rapidocr_sessions(engine, f"{provider}ExecutionProvider")
+            _ocr_engines[thread_id] = engine
         return _ocr_engines[thread_id]
 
 

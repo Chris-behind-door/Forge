@@ -8,6 +8,9 @@
 import React from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import type { Citation } from '../types'
 import './MarkdownContent.css'
 
@@ -65,6 +68,12 @@ function parseCitationText(text: string): { docName: string; location: string | 
   }
 }
 
+/** Normalize path separators for cross-platform comparison. */
+const normPath = (s: string) => s.replace(/\\/g, '/')
+
+/** Strip common file extensions for fuzzy name matching. */
+const stripExt = (s: string) => s.replace(/\.(chm|pdf|html?|htm)$/i, '')
+
 /** 通过 doc_name / location 匹配找到对应的 citation */
 function findMatchingCitation(
   citationText: string,
@@ -77,7 +86,7 @@ function findMatchingCitation(
   // 策略1：doc_name 精确匹配 + location 匹配
   if (location) {
     const exactBoth = citations.find(c =>
-      c.doc_name === docName && c.location && c.location.includes(location)
+      c.doc_name === docName && c.location && normPath(c.location).includes(normPath(location))
     )
     if (exactBoth) return exactBoth
 
@@ -96,15 +105,34 @@ function findMatchingCitation(
   const exactName = citations.find(c => c.doc_name === docName)
   if (exactName) return exactName
 
-  // 策略3：引用文本匹配 location（CHM 引用中引用文本常是 location 名而非 doc_name）
-  const locationMatch = citations.find(c =>
-    c.location && citationText.includes(c.location)
-  )
+  // 策略3：引用文本与 citation 的 location 互相包含（CHM 场景）
+  // LLM 可能输出 `[来源:规范名\path.html]` 而非标准的 `[来源:file.chm#path.html]`
+  const normCite = normPath(citationText)
+  const locationMatch = citations.find(c => {
+    if (!c.location) return false
+    const normLoc = normPath(c.location)
+    return normCite.includes(normLoc) || normLoc.includes(normCite)
+  })
   if (locationMatch) return locationMatch
 
-  // 策略4：引用文本包含 doc_name
+  // 策略3.5：引用文本的路径首段匹配 doc_name（CHM 子目录名匹配）
+  // 例如 "高层建筑混凝土结构技术规程/xxx.html" → 首段 "高层建筑混凝土结构技术规程"
+  const pathParts = normCite.split('/')
+  if (pathParts.length > 1) {
+    const firstDir = pathParts[0]
+    const chmNameMatch = citations.find(c =>
+      stripExt(c.doc_name) === firstDir
+    )
+    if (chmNameMatch) return chmNameMatch
+  }
+
+  // 策略4：模糊匹配（去除扩展名后互相包含）
   const fuzzy = citations.find(c =>
-    citationText.includes(c.doc_name) || c.doc_name.includes(docName)
+    citationText.includes(c.doc_name) ||
+    c.doc_name.includes(docName) ||
+    stripExt(c.doc_name) === stripExt(docName) ||
+    citationText.includes(stripExt(c.doc_name)) ||
+    stripExt(c.doc_name).includes(normCite)
   )
   if (fuzzy) return fuzzy
 
@@ -153,7 +181,8 @@ export default function MarkdownContent({ content, citations, onCitationClick }:
   return (
     <div className="markdown-content">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
         components={{
           p: ({ children }) => {
             const text = childrenToText(children)
