@@ -352,7 +352,7 @@ def _extract_text_bs(html_content: str, html_dir: Path | None = None) -> str:
         tag.decompose()
 
     if html_dir is not None:
-        from .docx import _ocr_image_bytes
+        from .ocr import ocr_image
 
         for img in soup.find_all("img"):
             src = str(img.get("src", ""))
@@ -362,7 +362,7 @@ def _extract_text_bs(html_content: str, html_dir: Path | None = None) -> str:
                 img_path = (html_dir / src).resolve()
                 if not img_path.is_file():
                     continue
-                ocr_text = _ocr_image_bytes(img_path.read_bytes())
+                ocr_text = ocr_image(img_path.read_bytes())
                 if ocr_text:
                     img.replace_with(f"\n[图片内容]\n{ocr_text}\n")
             except Exception as e:

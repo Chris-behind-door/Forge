@@ -12,12 +12,10 @@ DOCX 解析模块
 OCR 复用 pdf.py 中的 _get_ocr_engine()，支持 GPU 加速。
 """
 
-import io
 import logging
 import re
 from collections.abc import Generator
 
-import numpy as np
 from docx import Document
 from docx.oxml.ns import qn
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -42,32 +40,8 @@ def _extract_images(doc) -> dict[str, bytes]:
 
 
 def _ocr_image_bytes(image_bytes: bytes) -> str:
-    """对图片字节进行 OCR 识别。
-
-    Args:
-        image_bytes: 图片原始字节
-
-    Returns:
-        OCR 识别的文本，失败返回空字符串
-    """
-    try:
-        from PIL import Image
-
-        from .pdf import _get_ocr_engine
-
-        img = Image.open(io.BytesIO(image_bytes))
-        img_array = np.array(img)
-        if img_array.ndim == 3 and img_array.shape[2] == 4:
-            img_array = img_array[:, :, :3]
-
-        ocr = _get_ocr_engine()
-        result, _ = ocr(img_array)
-        if not result:
-            return ""
-        return "\n".join(item[1] for item in result)
-    except Exception as e:
-        logger.warning("图片 OCR 失败: %s", e)
-        return ""
+    from .ocr import ocr_image
+    return ocr_image(image_bytes)
 
 
 def _get_inline_image_rids(paragraph_element) -> list[str]:
