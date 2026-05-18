@@ -323,31 +323,50 @@ def _detect_encoding(html_content: bytes) -> str:
     return "gb18030"
 
 
-def _extract_text_from_html(html_content: str) -> str:
+def _extract_text_from_html(
+    html_content: str,
+    html_dir: Path | None = None,
+) -> str:
     """
     从 HTML 内容中提取纯文本
 
     Args:
         html_content: HTML 内容
+        html_dir: HTML 文件所在目录（用于解析 <img> 相对路径）
 
     Returns:
         纯文本
     """
-    # 优先用 BeautifulSoup，失败时用正则 fallback
     try:
-        return _extract_text_bs(html_content)
+        return _extract_text_bs(html_content, html_dir)
     except Exception:
         logger.debug("BeautifulSoup extraction failed, falling back to regex")
         return _extract_text_regex(html_content)
 
 
-def _extract_text_bs(html_content: str) -> str:
-    """使用 BeautifulSoup 提取文本"""
+def _extract_text_bs(html_content: str, html_dir: Path | None = None) -> str:
+    """使用 BeautifulSoup 提取文本，可选地对 <img> 标签执行 OCR"""
     soup = BeautifulSoup(html_content, "html.parser")
 
-    # 移除脚本和样式
     for tag in soup(["script", "style", "nav", "footer", "header"]):
         tag.decompose()
+
+    if html_dir is not None:
+        from .docx import _ocr_image_bytes
+
+        for img in soup.find_all("img"):
+            src = str(img.get("src", ""))
+            if not src:
+                continue
+            try:
+                img_path = (html_dir / src).resolve()
+                if not img_path.is_file():
+                    continue
+                ocr_text = _ocr_image_bytes(img_path.read_bytes())
+                if ocr_text:
+                    img.replace_with(f"\n[图片内容]\n{ocr_text}\n")
+            except Exception as e:
+                logger.debug("CHM <img> OCR 跳过 %s: %s", src, e)
 
     text = soup.get_text(separator="\n")
     lines = (line.strip() for line in text.splitlines())
@@ -485,7 +504,7 @@ def _process_html_file(
     encoding = _detect_encoding(raw_content)
     html_content = raw_content.decode(encoding, errors="replace")
 
-    text = _extract_text_from_html(html_content)
+    text = _extract_text_from_html(html_content, html_dir=html_file.parent)
     location = _extract_page_hint(html_file, base_dir)
     chapter_title = _extract_chapter_title(html_content)
 
