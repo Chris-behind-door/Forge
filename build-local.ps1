@@ -69,6 +69,8 @@ uv venv
 uv pip install -e ".[dev]"
 # 不再需要 torch！
 uv pip install pyinstaller
+# Replace CPU-only onnxruntime with DirectML variant (works with any GPU on Windows)
+uv pip install onnxruntime-directml
 Pop-Location
 
 # ── 3. 准备模型文件 ─────────────────────────────────────────

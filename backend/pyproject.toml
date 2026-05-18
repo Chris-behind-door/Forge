@@ -29,6 +29,11 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
+[project.optional-dependencies]
+gpu-dml = ["onnxruntime-directml>=1.17.0"]
+gpu-cuda = ["onnxruntime-gpu>=1.17.0"]
+gpu-rocm = ["onnxruntime-rocm>=1.17.0"]
+
 [dependency-groups]
 dev = [
     "ruff>=0.15.6",

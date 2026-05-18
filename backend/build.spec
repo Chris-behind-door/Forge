@@ -28,7 +28,8 @@ hiddenimports = [
 ]
 
 # Collect heavy packages
-for pkg in ['lancedb', 'fastembed', 'rapidocr_onnxruntime', 'fitz', 'pymupdf',
+for pkg in ['lancedb', 'fastembed', 'rapidocr_onnxruntime', 'onnxruntime',
+            'fitz', 'pymupdf',
             'langchain_text_splitters', 'llama_index', 'llama_index_workflows',
             'kuzu']:
     tmp_ret = collect_all(pkg)
