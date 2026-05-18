@@ -5,7 +5,7 @@ import { getApiBase } from '../api'
 
 const isSupportedFile = (name: string): boolean => {
   const ext = name.toLowerCase().split('.').pop()
-  return ext === 'pdf' || ext === 'chm'
+  return ext === 'pdf' || ext === 'chm' || ext === 'docx'
 }
 
 interface Props {
@@ -37,7 +37,7 @@ export default function UploadArea({ selectedProjectId, selectedProjectName, onU
   const handleFilePaths = useCallback(async (paths: string[]) => {
     if (isUploadingRef.current) return
     const supportedPaths = paths.filter(isSupportedFile)
-    if (supportedPaths.length === 0) { message.warning('请拖拽 PDF 或 CHM 文件'); return }
+    if (supportedPaths.length === 0) { message.warning('请拖拽 PDF、CHM 或 DOCX 文件'); return }
     isUploadingRef.current = true
     setUploading(true)
     let successCount = 0
@@ -51,7 +51,7 @@ export default function UploadArea({ selectedProjectId, selectedProjectName, onU
   const handleSelectFiles = useCallback(async () => {
     try {
       const { open } = await import('@tauri-apps/plugin-dialog')
-      const selected = await open({ multiple: true, filters: [{ name: '文档', extensions: ['pdf', 'chm'] }] })
+      const selected = await open({ multiple: true, filters: [{ name: '文档', extensions: ['pdf', 'chm', 'docx'] }] })
       if (!selected) return
       const paths = Array.isArray(selected) ? selected : [selected]
       await handleFilePaths(paths)
@@ -104,7 +104,7 @@ export default function UploadArea({ selectedProjectId, selectedProjectName, onU
       <div className={`upload-area ${isDragging ? 'dragging' : ''}`} onClick={handleSelectFiles}>
         <InboxOutlined className="upload-icon" />
         <p className="upload-text">点击或拖拽文件到此区域上传</p>
-        <p className="upload-hint">支持 PDF 和 CHM 格式</p>
+        <p className="upload-hint">支持 PDF、CHM 和 DOCX 格式</p>
       </div>
       <div className="upload-actions">
         <Button icon={<UploadOutlined />} onClick={handleSelectFiles} loading={uploading}>选择文件</Button>

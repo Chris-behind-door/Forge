@@ -350,8 +350,8 @@ async def upload(request: DocumentUploadRequest) -> Document:
         raise HTTPException(status_code=400, detail=f"不是有效文件: {request.file_path}")
 
     suffix = source_path.name.lower().split(".")[-1] if "." in source_path.name else ""
-    if suffix not in ("pdf", "chm"):
-        raise HTTPException(status_code=400, detail=f"不支持的文件类型: .{suffix}，仅支持 PDF 和 CHM")
+    if suffix not in ("pdf", "chm", "docx"):
+        raise HTTPException(status_code=400, detail=f"不支持的文件类型: .{suffix}，仅支持 PDF、CHM 和 DOCX")
 
     file_hash = _calculate_file_hash(source_path)
     metadata = _load_metadata()

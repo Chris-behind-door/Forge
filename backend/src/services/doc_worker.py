@@ -81,6 +81,9 @@ def _worker_main(
         if file_type == "chm":
             from ..parsers.chm import parse_chm_iter
             parser_iter = parse_chm_iter(stored_path)
+        elif file_type == "docx":
+            from ..parsers.docx import parse_docx_iter
+            parser_iter = parse_docx_iter(stored_path)
         else:
             from ..parsers.pdf import parse_pdf_iter
             parser_iter = parse_pdf_iter(stored_path)
