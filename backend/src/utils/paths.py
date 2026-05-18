@@ -54,6 +54,7 @@ BACKEND_DIR = _resolve_backend_dir()
 DATA_DIR = _resolve_data_dir()
 UPLOADS_DIR = DATA_DIR / "uploads"
 METADATA_FILE = DATA_DIR / "documents.json"
+MEMO_FILE = DATA_DIR / "memo.json"
 
 # LanceDB vectors: use exe-adjacent path on Windows to avoid
 # lance Rust bug that drops drive letter from file:// URLs

@@ -56,8 +56,38 @@ SEARCH_KB_TOOL = {
     },
 }
 
+UPDATE_MEMO_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "update_memo",
+        "description": (
+            "维护术语备忘录。当发现两个术语容易混淆、有严格区别需要记住时，"
+            "使用此工具记录。也用于纠正之前记录的错误信息。"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["add", "delete"],
+                    "description": "add=添加或更新一条备忘, delete=删除一条备忘",
+                },
+                "term": {
+                    "type": "string",
+                    "description": "术语或概念名称，如'承载力特征值 vs 承载力标准值'",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "术语说明、区别描述、使用注意事项",
+                },
+            },
+            "required": ["action", "term"],
+        },
+    },
+}
+
 # 所有可用工具列表
-ALL_TOOLS = [SEARCH_KB_TOOL, SEARCH_RESOLUTIONS_TOOL]
+ALL_TOOLS = [SEARCH_KB_TOOL, SEARCH_RESOLUTIONS_TOOL, UPDATE_MEMO_TOOL]
 
 # 工具名 → 执行函数映射
 _TOOL_FUNCTIONS: dict[str, Any] = {}
@@ -164,6 +194,23 @@ async def _search_resolutions(query: str, top_k: int = 5) -> tuple[str, list[dic
 # 注册工具函数
 _TOOL_FUNCTIONS["search_knowledge_base"] = _search_knowledge_base
 _TOOL_FUNCTIONS["search_resolutions"] = _search_resolutions
+
+
+def _update_memo(action: str, term: str, content: str = "") -> tuple[str, list[dict]]:
+    from ..services.memo_service import update_memo_entry, delete_memo_entry
+
+    if action == "add":
+        if not content:
+            return "错误：添加备忘时 content 不能为空", []
+        result = update_memo_entry(term, content)
+        return result, []
+    elif action == "delete":
+        result = delete_memo_entry(term)
+        return result, []
+    return f"未知操作: {action}", []
+
+
+_TOOL_FUNCTIONS["update_memo"] = _update_memo
 
 
 async def execute_tool(tool_name: str, arguments: dict) -> tuple[str, list[dict]]:

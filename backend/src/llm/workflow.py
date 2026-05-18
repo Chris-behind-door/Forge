@@ -37,7 +37,7 @@ EXPAND_BEFORE = 1
 EXPAND_AFTER = 1
 
 # Maximum tool-call rounds before forcing generation.
-MAX_TOOL_ROUNDS = 3
+MAX_TOOL_ROUNDS = 8
 
 # Cap expanded context to avoid blowing up the prompt.
 MAX_CONTEXT_CHARS = 15000
@@ -202,6 +202,12 @@ class QueryWorkflow(Workflow):
         # Inject session history context after system prompt
         if context_messages:
             messages.extend(context_messages)
+        # Load memo content and inject into system prompt
+        from ..services.memo_service import format_memo_for_prompt
+
+        memo_text = format_memo_for_prompt()
+        if memo_text:
+            messages.append({"role": "system", "content": f"## 术语备忘录\n\n{memo_text}"})
         messages.append({"role": "user", "content": question})
         retrieved_chunks: list[dict] = []
         rounds = 0
